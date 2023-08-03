@@ -35,6 +35,7 @@ jobs:
           body: |
             Add release notes here
             You can also include links to the artifacts like mvn jar and pypi package.
+            ${{steps.build_changelog.outputs.changelog}}
           draft: false
           prerelease: false
 
