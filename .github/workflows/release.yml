@@ -1,0 +1,40 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main # Change 'main' to your default branch name
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # You can use other runners like macOS or Windows
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Add steps here to build and test your code, if required.
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x # Specify the Python version you need
+
+      # Add steps here to build the Python package, generate a wheel, etc.
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.0.0 # Specify the version number you want to release
+          release_name: Release ${{ github.ref }}
+          body: |
+            Add release notes here
+            You can also include links to the artifacts like mvn jar and pypi package.
+          draft: false
+          prerelease: false
+
+      # Add steps here to upload any additional artifacts (e.g., mvn jar, pypi package, etc.) if required.
+
