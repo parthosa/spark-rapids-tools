@@ -5,12 +5,6 @@ on:
     tags:
       - 'v*' # Change 'main' to your default branch name
 
-changelog:
-  categories:
-    - title: Other Changes
-      labels:
-        - "*"
-
 jobs:
   build:
     runs-on: ubuntu-latest # You can use other runners like macOS or Windows
@@ -25,6 +19,10 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: 3.x # Specify the Python version you need
+
+      - name: "Build Changelog"
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@{latest-release}
 
       - name: Create Release
         id: create_release
@@ -41,4 +39,3 @@ jobs:
           prerelease: false
 
       # Add steps here to upload any additional artifacts (e.g., mvn jar, pypi package, etc.) if required.
-
