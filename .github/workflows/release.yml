@@ -33,7 +33,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v1.0.0 # Specify the version number you want to release
+          tag_name: ${{ github.ref }} # Specify the version number you want to release
           release_name: Release ${{ github.ref }}
           body: |
             Add release notes here
