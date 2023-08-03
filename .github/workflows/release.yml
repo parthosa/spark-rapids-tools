@@ -2,8 +2,8 @@ name: Auto Release
 
 on:
   push:
-    branches:
-      - main # Change 'main' to your default branch name
+    tags:
+      - 'v*' # Change 'main' to your default branch name
 
 jobs:
   build:
@@ -21,6 +21,11 @@ jobs:
           python-version: 3.x # Specify the Python version you need
 
       # Add steps here to build the Python package, generate a wheel, etc.
+      - name: Changelog
+        uses: scottbrenner/generate-changelog-action@master
+        id: Changelog
+        env:
+          REPO: ${{ github.repository }}
 
       - name: Create Release
         id: create_release
