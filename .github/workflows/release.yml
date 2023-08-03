@@ -3,11 +3,12 @@ name: Auto Release
 on:
   push:
     tags:
-      - 'v*' # Change 'main' to your default branch name
+      - 'v*' # Only trigger on tags starting with 'v'
 
 jobs:
   build:
-    runs-on: ubuntu-latest # You can use other runners like macOS or Windows
+    runs-on: ubuntu-latest
+
 
     steps:
       - name: Checkout code
@@ -18,11 +19,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.x # Specify the Python version you need
+          python-version: 3.x
 
-      - name: "Build Changelog"
-        id: build_changelog
-        uses: mikepenz/release-changelog-builder-action@v4
+      # Add steps here to build the Python package, generate a wheel, etc.
+
+      - name: Fetch all tags
+        run: git fetch --tags
 
       - name: Create Release
         id: create_release
@@ -30,13 +32,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref }} # Specify the version number you want to release
+          tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
             Add release notes here
-            You can also include links to the artifacts like mvn jar and pypi package.
-            ${{steps.build_changelog.outputs.changelog}}
+            ${{ steps.changelog.outputs.changelog }}
           draft: false
           prerelease: false
 
       # Add steps here to upload any additional artifacts (e.g., mvn jar, pypi package, etc.) if required.
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          from_tag="v1.0.5"
+          to_tag="${{ github.ref }}"
+          changelog=$(git log --pretty=format:"- %s" $from_tag...$to_tag)
+          echo "::set-output name=changelog::$changelog"
