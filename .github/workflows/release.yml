@@ -1,32 +1,38 @@
-name: Release # Workflow name displayed on GitHub
+name: Auto Release
 
 on:
-  workflow_dispatch: # Trigger manually
   push:
-    branches:
-      - main # Branch on which the workflow will run
+    tags:
+      - 'v*' # Change 'main' to your default branch name
 
 jobs:
-  new-release:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest # You can use other runners like macOS or Windows
 
     steps:
-      - name: Checkout our working repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-      - name: Conventional Changelog Action
-        id: changelog
-        uses: TriPSs/conventional-changelog-action@v3
+      - name: "Build Changelog"
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v4
         with:
-          github-token: ${{ secrets.github_token }}
-          output-file: "false"
-
-      - name: Create Release # This action will create the actual release
-        uses: actions/create-release@v1
-        if: ${{ steps.changelog.outputs.skipped == 'false' }}
+          configuration: "configuration.json"
         env:
-          GITHUB_TOKEN: ${{ secrets.github_token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.changelog.outputs.tag }}
-          release_name: ${{ steps.changelog.outputs.tag }}
-          body: ${{ steps.changelog.outputs.clean_changelog }}
+          tag_name: ${{ github.ref }} # Specify the version number you want to release
+          release_name: Release ${{ github.ref }}
+          body: |
+            Add release notes here
+            You can also include links to the artifacts like mvn jar and pypi package.
+            ${{steps.build_changelog.outputs.changelog}}
+          draft: false
+
+      # Add steps here to upload any additional artifacts (e.g., mvn jar, pypi package, etc.) if required.
