@@ -13,22 +13,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-
-      - name: Use Node.js
-        uses: actions/setup-node@v2
+      
+      - name: Conventional Changelog Action
+        uses: TriPSs/conventional-changelog-action@v3
         with:
-          node-version: '14' # Specify the Node.js version you need
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Generate Changelog
-        run: npx conventional-changelog -p angular -i CHANGELOG.md -s
-
-      - name: Commit and Push Changelog
-        run: |
-          git config --global user.name 'Your Name'
-          git config --global user.email 'youremail@example.com'
-          git add CHANGELOG.md
-          git commit -m "Update Changelog for ${{ github.ref }}"
-          git push origin HEAD
+          github-token: ${{ secrets.github_token }}
+  
