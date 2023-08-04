@@ -18,6 +18,7 @@ jobs:
         uses: mikepenz/release-changelog-builder-action@v4
         with:
           configuration: ".github/workflows/configuration.json"
+          outputFile: "CHANGELOG.md"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -28,10 +29,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref }} # Specify the version number you want to release
-          release_name: Release ${{ github.ref }}
+          release_name: ${{ github.ref }}
           body: |
-            Add release notes here
-            You can also include links to the artifacts like mvn jar and pypi package.
             ${{steps.build_changelog.outputs.changelog}}
           draft: false
 
