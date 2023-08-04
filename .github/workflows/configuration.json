@@ -9,5 +9,9 @@
       "labels": ["tools"]
     }
   ],
+  "sort": {
+    "order": "DESC",
+    "on_property": "mergedAt"
+  },
   "pr_template": "- ${{TITLE}} (#${{NUMBER}}) (${{MERGE_SHA}})"
 }
