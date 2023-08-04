@@ -1,40 +1,32 @@
-name: Auto Release
+name: Release # Workflow name displayed on GitHub
 
 on:
+  workflow_dispatch: # Trigger manually
   push:
     branches:
-      - main # Change 'main' to your default branch name
+      - main # Branch on which the workflow will run
 
 jobs:
-  build:
-    runs-on: ubuntu-latest # You can use other runners like macOS or Windows
+  new-release:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+      - name: Checkout our working repository
+        uses: actions/checkout@v3
 
-      # Add steps here to build and test your code, if required.
-
-      - name: Set up Python
-        uses: actions/setup-python@v2
+      - name: Conventional Changelog Action
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v3
         with:
-          python-version: 3.x # Specify the Python version you need
+          github-token: ${{ secrets.github_token }}
+          output-file: "false"
 
-      # Add steps here to build the Python package, generate a wheel, etc.
-
-      - name: Create Release
-        id: create_release
+      - name: Create Release # This action will create the actual release
         uses: actions/create-release@v1
+        if: ${{ steps.changelog.outputs.skipped == 'false' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.github_token }}
         with:
-          tag_name: v1.0.0 # Specify the version number you want to release
-          release_name: Release ${{ github.ref }}
-          body: |
-            Add release notes here
-            You can also include links to the artifacts like mvn jar and pypi package.
-          draft: false
-          prerelease: false
-
-      # Add steps here to upload any additional artifacts (e.g., mvn jar, pypi package, etc.) if required.
-
+          tag_name: ${{ steps.changelog.outputs.tag }}
+          release_name: ${{ steps.changelog.outputs.tag }}
+          body: ${{ steps.changelog.outputs.clean_changelog }}
