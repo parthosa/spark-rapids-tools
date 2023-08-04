@@ -9,7 +9,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
@@ -22,9 +21,6 @@ jobs:
           python-version: 3.x
 
       # Add steps here to build the Python package, generate a wheel, etc.
-
-      - name: Fetch all tags
-        run: git fetch --tags
 
       - name: Create Release
         id: create_release
@@ -48,7 +44,5 @@ jobs:
       - name: Generate Changelog
         id: changelog
         run: |
-          from_tag="v1.0.5"
-          to_tag="${{ github.ref }}"
-          changelog=$(git log --pretty=format:"- %s" $from_tag...$to_tag)
-          echo "::set-output name=changelog::$changelog"
+          npx conventional-changelog -p angular -i CHANGELOG.md -s
+          echo "::set-output name=changelog::$(cat CHANGELOG.md)"
