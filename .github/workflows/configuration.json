@@ -1,11 +1,11 @@
 {
   "categories": [
     {
-      "title": "## User Tools",
+      "title": "### User Tools",
       "labels": ["user_tools"]
     },
     {
-      "title": "## Core",
+      "title": "### Core",
       "labels": ["tools"]
     }
   ],
