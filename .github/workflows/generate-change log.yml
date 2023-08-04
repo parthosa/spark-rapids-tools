@@ -1,6 +1,7 @@
 name: Generate Changelog
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*' # Trigger only on new tags starting with 'v'
