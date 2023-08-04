@@ -31,6 +31,12 @@ jobs:
           tag_name: ${{ github.ref }} # Specify the version number you want to release
           release_name: ${{ github.ref }}
           body: |
+            ## Packages
+            
+            - mvn jar file: https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref }}/
+            - pypi package: https://pypi.org/project/spark-rapids-user-tools/  
+            
+            ## Changes
             ${{steps.build_changelog.outputs.changelog}}
           draft: false
 
