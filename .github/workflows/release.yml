@@ -26,6 +26,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.github_token }}
         with:
-          tag_name: ${{ steps.changelog.outputs.tag }}
-          release_name: ${{ steps.changelog.outputs.tag }}
+          tag_name: ${{ github.ref }} # Specify the version number you want to release
+          release_name: ${{ github.ref }}
           body: ${{ steps.changelog.outputs.clean_changelog }}
