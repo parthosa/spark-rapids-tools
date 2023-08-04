@@ -1,12 +1,12 @@
 {
   "categories": [
     {
-      "title": "## 🚀 Features",
-      "labels": ["feature"]
+      "title": "## 🚀 User Tools",
+      "labels": ["user_tools"]
     },
     {
-      "title": "## 🐛 Fixes",
-      "labels": ["fix"]
+      "title": "## 🐛 Core",
+      "labels": ["tools"]
     },
     {
       "key": "tests",
@@ -37,7 +37,7 @@
     "on_property": "mergedAt"
   },
   "template": "${{CHANGELOG}}\n\n<details>\n<summary>Uncategorized</summary>\n\n${{UNCATEGORIZED}}\n</details>",
-  "pr_template": "- ${{TITLE}}\n   - PR: #${{NUMBER}}",
+  "pr_template": "- ${{TITLE}} (#${{NUMBER}})",
   "empty_template": "- no changes",
   "label_extractor": [
     {
