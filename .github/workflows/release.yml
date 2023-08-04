@@ -13,36 +13,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      # Add steps here to build and test your code, if required.
-
-      - name: Set up Python
-        uses: actions/setup-python@v2
+      - name: Conventional Changelog Action
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v3
         with:
-          python-version: 3.x
-
-      # Add steps here to build the Python package, generate a wheel, etc.
+          github-token: ${{ secrets.github_token }}
+          output-file: "false"
 
       - name: Create Release
-        id: create_release
         uses: actions/create-release@v1
+        if: ${{ steps.changelog.outputs.skipped == 'false' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.github_token }}
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          body: |
-            Add release notes here
-            ${{ steps.changelog.outputs.changelog }}
-          draft: false
-          prerelease: false
-
-      # Add steps here to upload any additional artifacts (e.g., mvn jar, pypi package, etc.) if required.
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Generate Changelog
-        id: changelog
-        run: |
-          npx conventional-changelog -p angular -i CHANGELOG.md -s
-          echo "::set-output name=changelog::$(cat CHANGELOG.md)"
+          tag_name: ${{ steps.changelog.outputs.tag }}
+          release_name: ${{ steps.changelog.outputs.tag }}
+          body: ${{ steps.changelog.outputs.clean_changelog }}
