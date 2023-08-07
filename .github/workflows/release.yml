@@ -1,6 +1,7 @@
 name: Auto Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*' # Change 'main' to your default branch name
