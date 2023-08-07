@@ -1,10 +1,14 @@
-name: Auto Release
+name: Release
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Allow manual triggering
   push:
     tags:
-      - 'v*' # Change 'main' to your default branch name
+      - 'v*' # Trigger only on tags starting with 'v'
+
+env:
+  MVN_JAR_URL: "https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name }}"
+  PYPI_PACKAGE_URL: "https://pypi.org/project/spark-rapids-user-tools/"
 
 jobs:
   build:
@@ -14,12 +18,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: "Build Changelog"
+      - name: Build Changelog
         id: build_changelog
         uses: mikepenz/release-changelog-builder-action@v4
         with:
-          configuration: ".github/workflows/configuration.json"
-          outputFile: "CHANGELOG.md"
+          configuration: ".github/workflows/configuration.json" # Configuration file for the changelog builder (optional)
+          outputFile: "CHANGELOG.md" # Specify the output file for the generated changelog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -29,16 +33,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref }} # Specify the version number you want to release
-          release_name: ${{ github.ref }}
+          tag_name: ${{ github.ref }} # Use the version number from the tag
+          release_name: ${{ github.ref }} # Use the version number as the release name
           body: |
             ## Packages
             
-            - mvn jar file: https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name }}/
-            - pypi package: https://pypi.org/project/spark-rapids-user-tools/  
+            - mvn jar file: ${{ env.MVN_JAR_URL }} 
+            - pypi package: ${{ env.PYPI_PACKAGE_URL }}
             
             ## Changes
-            ${{steps.build_changelog.outputs.changelog}}
+            ${{ steps.build_changelog.outputs.changelog }}
           draft: false
-
-      # Add steps here to upload any additional artifacts (e.g., mvn jar, pypi package, etc.) if required.
