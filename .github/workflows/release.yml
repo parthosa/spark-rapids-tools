@@ -33,7 +33,7 @@ jobs:
           body: |
             ## Packages
             
-            - mvn jar file: https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref }}/
+            - mvn jar file: https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name }}/
             - pypi package: https://pypi.org/project/spark-rapids-user-tools/  
             
             ## Changes
