@@ -1,32 +1,46 @@
-name: Release # Workflow name displayed on GitHub
+name: Release
 
 on:
-  workflow_dispatch: # Trigger manually
+  workflow_dispatch: # Allow manual triggering
   push:
-    branches:
-      - main # Branch on which the workflow will run
+    tags:
+      - 'v*' # Trigger only on tags starting with 'v'
+
+env:
+  MVN_JAR_URL: "https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name }}"
+  PYPI_PACKAGE_URL: "https://pypi.org/project/spark-rapids-user-tools/"
 
 jobs:
-  new-release:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest # You can use other runners like macOS or Windows
 
     steps:
-      - name: Checkout our working repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-      - name: Conventional Changelog Action
-        id: changelog
-        uses: TriPSs/conventional-changelog-action@v3
+      - name: Build Changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v4
         with:
-          github-token: ${{ secrets.github_token }}
-          output-file: "false"
-
-      - name: Create Release # This action will create the actual release
-        uses: actions/create-release@v1
-        if: ${{ steps.changelog.outputs.skipped == 'false' }}
+          configuration: ".github/workflows/configuration.json" # Configuration file for the changelog builder (optional)
+          outputFile: "CHANGELOG.md" # Specify the output file for the generated changelog
         env:
-          GITHUB_TOKEN: ${{ secrets.github_token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.changelog.outputs.tag }}
-          release_name: ${{ steps.changelog.outputs.tag }}
-          body: ${{ steps.changelog.outputs.clean_changelog }}
+          tag_name: ${{ github.ref }} # Use the version number from the tag
+          release_name: ${{ github.ref }} # Use the version number as the release name
+          body: |
+            ## Packages
+            
+            - mvn jar file: ${{ env.MVN_JAR_URL }} 
+            - pypi package: ${{ env.PYPI_PACKAGE_URL }}
+            
+            ## Changes
+            ${{ steps.build_changelog.outputs.changelog }}
+          draft: false
