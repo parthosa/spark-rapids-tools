@@ -23,6 +23,7 @@ jobs:
         uses: mikepenz/release-changelog-builder-action@v4
         with:
           configuration: ".github/workflows/configuration.json" # Configuration file for the changelog builder (optional)z
+          outputFile: "CHANGELOG_BODY.md"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -33,7 +34,7 @@ jobs:
           echo "# Changes" > CURRENT_CHANGELOG.md
           echo "Generated on $CURRENT_DATE" >> CURRENT_CHANGELOG.md
           echo "## Release ${{ github.ref_name }}" >> CURRENT_CHANGELOG.md
-          cat CURRENT_CHANGELOG.md ${{ steps.build_changelog.outputs.changelog }} >> TEMP_CHANGELOG.md
+          cat CURRENT_CHANGELOG.md CHANGELOG_BODY.md >> TEMP_CHANGELOG.md
           cat TEMP_CHANGELOG.md CHANGELOG.md > NEW_CHANGELOG.md
 
           git config user.name "GitHub Actions"
