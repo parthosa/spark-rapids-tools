@@ -7,7 +7,7 @@ on:
       - 'v*' # Trigger only on tags starting with 'v'
 
 env:
-  MAVEN_URL: "https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name.replace('v', '') }}"
+  MAVEN_URL: "https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/"
   PYPI_URL: "https://pypi.org/project/spark-rapids-user-tools/"
 
 jobs:
@@ -45,6 +45,16 @@ jobs:
           git commit -m "Update changelogs"
           git push origin main
 
+      - name: Set Version Number
+        id: set_version
+        run: |
+          # Extract version number from the tag (e.g., 'v1.2.3' -> '1.2.3')
+          VERSION=${{ github.ref_name }}
+          VERSION=${VERSION#v}  # Remove 'v' prefix
+
+          # Set the extracted version as an environment variable
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -56,7 +66,7 @@ jobs:
           body: |
             ## Packages
             
-            - Maven Release: ${{ env.MAVEN_URL }} 
+            - Maven Release: ${{ env.MAVEN_URL }}/${{ env.VERSION }}
             - PyPI Package: ${{ env.PYPI_URL }}
             
             ## Changes
