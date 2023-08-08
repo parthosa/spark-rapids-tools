@@ -7,12 +7,12 @@ on:
       - 'v*' # Trigger only on tags starting with 'v'
 
 env:
-  MVN_JAR_URL: "https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name }}"
+  MVN_JAR_URL: "https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name.replace('v', '') }}"
   PYPI_PACKAGE_URL: "https://pypi.org/project/spark-rapids-user-tools/"
 
 jobs:
   build:
-    runs-on: ubuntu-latest # You can use other runners like macOS or Windows
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -22,10 +22,28 @@ jobs:
         id: build_changelog
         uses: mikepenz/release-changelog-builder-action@v4
         with:
-          configuration: ".github/workflows/configuration.json" # Configuration file for the changelog builder (optional)
-          outputFile: "CHANGELOG.md" # Specify the output file for the generated changelog
+          configuration: ".github/workflows/configuration.json" # Configuration file for the changelog builder (optional)z
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit and Push Changelogs
+        if: steps.build_changelog.outputs.changes > 0
+        run: |
+          CURRENT_DATE=$(date +'%Y-%m-%d')
+          echo "# Changes" > CURRENT_CHANGELOG.md
+          echo "Generated on $CURRENT_DATE" >> CURRENT_CHANGELOG.md
+          echo "## Release ${{ github.ref_name }}" >> CURRENT_CHANGELOG.md
+          cat CURRENT_CHANGELOG.md ${{ steps.build_changelog.outputs.changelog }} >> TEMP_CHANGELOG.md
+          cat TEMP_CHANGELOG.md CHANGELOG.md > NEW_CHANGELOG.md
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          git checkout main
+          mv NEW_CHANGELOG.md CHANGELOG.md
+          git add CHANGELOG.md
+          git commit -m "Update changelogs"
+          git push origin main
 
       - name: Create Release
         id: create_release
@@ -38,8 +56,8 @@ jobs:
           body: |
             ## Packages
             
-            - mvn jar file: ${{ env.MVN_JAR_URL }} 
-            - pypi package: ${{ env.PYPI_PACKAGE_URL }}
+            - Maven Release: ${{ env.MVN_JAR_URL }} 
+            - PyPI Package: ${{ env.PYPI_PACKAGE_URL }}
             
             ## Changes
             ${{ steps.build_changelog.outputs.changelog }}
