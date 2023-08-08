@@ -40,6 +40,7 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
+          git fetch origin main
           git checkout main
           mv NEW_CHANGELOG.md CHANGELOG.md
           git add CHANGELOG.md
