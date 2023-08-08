@@ -7,8 +7,8 @@ on:
       - 'v*' # Trigger only on tags starting with 'v'
 
 env:
-  MVN_JAR_URL: "https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name.replace('v', '') }}"
-  PYPI_PACKAGE_URL: "https://pypi.org/project/spark-rapids-user-tools/"
+  MAVEN_URL: "https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark-tools_2.12/${{ github.ref_name.replace('v', '') }}"
+  PYPI_URL: "https://pypi.org/project/spark-rapids-user-tools/"
 
 jobs:
   build:
@@ -56,8 +56,8 @@ jobs:
           body: |
             ## Packages
             
-            - Maven Release: ${{ env.MVN_JAR_URL }} 
-            - PyPI Package: ${{ env.PYPI_PACKAGE_URL }}
+            - Maven Release: ${{ env.MAVEN_URL }} 
+            - PyPI Package: ${{ env.PYPI_URL }}
             
             ## Changes
             ${{ steps.build_changelog.outputs.changelog }}
