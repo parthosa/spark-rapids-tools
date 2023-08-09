@@ -1,5 +1,17 @@
 <br/>
 
+## Release v1.2.11
+Generated on 2023-08-09
+### User Tools
+
+- Update release file ([#43](https://github.com/parthosa/spark-rapids-tools/pull/43))
+
+### Core
+
+- Fix misc category in config json ([#42](https://github.com/parthosa/spark-rapids-tools/pull/42))
+
+<br/>
+
 ## Release v1.2.10
 Generated on 2023-08-09
 ### User Tools
