@@ -31,8 +31,9 @@ jobs:
         if: steps.build_changelog.outputs.changes > 0
         run: |
           CURRENT_DATE=$(date +'%Y-%m-%d')
+          BRANCH_URL=https://github.com/$GITHUB_REPOSITORY/tree/${{ github.ref_name }}
           echo -e "<br/>\n" > CURRENT_CHANGELOG.md
-          echo "## Release ${{ github.ref_name }}" >> CURRENT_CHANGELOG.md
+          echo "## Release [${{ github.ref_name }}]($BRANCH_URL)" >> CURRENT_CHANGELOG.md
           echo "Generated on $CURRENT_DATE" >> CURRENT_CHANGELOG.md
           cat CURRENT_CHANGELOG.md CHANGELOG_BODY.md >> TEMP_CHANGELOG.md
           cat TEMP_CHANGELOG.md CHANGELOG.md > NEW_CHANGELOG.md
