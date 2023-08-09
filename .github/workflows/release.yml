@@ -31,7 +31,7 @@ jobs:
         if: steps.build_changelog.outputs.changes > 0
         run: |
           CURRENT_DATE=$(date +'%Y-%m-%d')
-          echo "<br/>" > CURRENT_CHANGELOG.md
+          echo -e "<br/>\n" > CURRENT_CHANGELOG.md
           echo "## Release ${{ github.ref_name }}" >> CURRENT_CHANGELOG.md
           echo "Generated on $CURRENT_DATE" >> CURRENT_CHANGELOG.md
           cat CURRENT_CHANGELOG.md CHANGELOG_BODY.md >> TEMP_CHANGELOG.md
