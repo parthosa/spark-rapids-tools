@@ -1,3 +1,11 @@
+<br/>
+
+## Release [v1.2.18](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.18)
+Generated on 2023-08-09
+### User Tools
+
+- Fix PyPI url ([#48](https://github.com/parthosa/spark-rapids-tools/pull/48))
+
 
 <br/>
 
