@@ -1,6 +1,15 @@
 
 <br/>
 
+## Release [v1.2.16](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.16)
+Generated on 2023-08-09
+### Miscellaneous
+
+- Log PRs ([#47](https://github.com/parthosa/spark-rapids-tools/pull/47))
+
+
+<br/>
+
 ## Release [v1.2.15](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.15)
 Generated on 2023-08-09
 ### Core
