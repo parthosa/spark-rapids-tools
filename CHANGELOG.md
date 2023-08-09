@@ -5,9 +5,11 @@ Generated on 2023-08-08
 <h3>Uncategorized</h3>
 
 - Fix release changelog fetch main ([#39](https://github.com/parthosa/spark-rapids-tools/pull/39)) (f5c87f7e6ed83a3730e1b33bd0099615a5c92482)
-# Changes
-Generated on 2023-08-08
+<br/>
+
+
 ## Release v1.2.8
+Generated on 2023-08-08
 ### User Tools
 
 - Fix release changelog (#37) (04c9143368daa231186445916b785220bb777f93)
