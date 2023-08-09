@@ -2,11 +2,13 @@
 
 ## Release [v1.2.13](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.13)
 Generated on 2023-08-09
-- no changes<br/>
+- no changes
+
+<br/>
 
 ## Release [v1.2.12](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.12)
 Generated on 2023-08-09
-Miscellaneous
+### Miscellaneous
 
 - Add URL to release branch ([#44](https://github.com/parthosa/spark-rapids-tools/pull/44))
 
