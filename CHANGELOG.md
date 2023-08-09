@@ -1,3 +1,18 @@
+<br/>
+## Release v1.2.10
+Generated on 2023-08-09
+### User Tools
+
+- Remove sha from PR template ([#41](https://github.com/parthosa/spark-rapids-tools/pull/41))
+
+### Core
+
+- Update release yml file ([#40](https://github.com/parthosa/spark-rapids-tools/pull/40))
+
+
+
+<h3>Uncategorized</h3>
+
 ## Release v1.2.9
 Generated on 2023-08-08
 
