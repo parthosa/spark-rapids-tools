@@ -7,12 +7,15 @@
     {
       "title": "### Core",
       "labels": ["tools"]
+    },
+    {
+      "title": "Miscellaneous",
+      "labels": []
     }
   ],
   "sort": {
     "order": "DESC",
     "on_property": "mergedAt"
   },
-  "template": "${{CHANGELOG}}\n\n<h3>Uncategorized</h3>\n\n${{UNCATEGORIZED}}",
   "pr_template": "- ${{TITLE}} ([#${{NUMBER}}](${{URL}}))"
 }
