@@ -1,6 +1,11 @@
 
 <br/>
 
+## Release [v1.2.17](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.17)
+Generated on 2023-08-09
+- no changes
+<br/>
+
 ## Release [v1.2.16](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.16)
 Generated on 2023-08-09
 ### Miscellaneous
