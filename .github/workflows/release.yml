@@ -69,8 +69,8 @@ jobs:
           body: |
             ## Packages
             
-            - Maven Release: ${{ env.MAVEN_URL }}/${{ env.VERSION }}
-            - PyPI Package: ${{ env.PYPI_URL }}/${{ env.VERSION }}
+            - Maven Release: ${{ env.MAVEN_URL }}/${{ env.VERSION }}/
+            - PyPI Package: ${{ env.PYPI_URL }}/${{ env.VERSION }}/
             
             ## Changes
             ${{ steps.build_changelog.outputs.changelog }}
