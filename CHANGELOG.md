@@ -1,4 +1,5 @@
 <br/>
+
 ## Release v1.2.10
 Generated on 2023-08-09
 ### User Tools
@@ -9,9 +10,7 @@ Generated on 2023-08-09
 
 - Update release yml file ([#40](https://github.com/parthosa/spark-rapids-tools/pull/40))
 
-
-
-<h3>Uncategorized</h3>
+<br/>
 
 ## Release v1.2.9
 Generated on 2023-08-08
