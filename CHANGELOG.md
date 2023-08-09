@@ -1,3 +1,16 @@
+
+<br/>
+
+## Release [v1.2.15](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.15)
+Generated on 2023-08-09
+### Core
+
+- Improve release ([#46](https://github.com/parthosa/spark-rapids-tools/pull/46))
+
+### Miscellaneous
+
+- Fix misc tag format ([#45](https://github.com/parthosa/spark-rapids-tools/pull/45))
+
 <br/>
 
 ## Release [v1.2.13](https://github.com/parthosa/spark-rapids-tools/tree/v1.2.13)
