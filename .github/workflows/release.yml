@@ -27,12 +27,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit and Push Changelogs
+      - name: Commit and Push Changelog
         if: steps.build_changelog.outputs.changes > 0
         run: |
           CURRENT_DATE=$(date +'%Y-%m-%d')
           BRANCH_URL=https://github.com/$GITHUB_REPOSITORY/tree/${{ github.ref_name }}
-          echo -e "<br/>\n" > CURRENT_CHANGELOG.md
+          echo -e "\n<br/>\n" > CURRENT_CHANGELOG.md
           echo "## Release [${{ github.ref_name }}]($BRANCH_URL)" >> CURRENT_CHANGELOG.md
           echo "Generated on $CURRENT_DATE" >> CURRENT_CHANGELOG.md
           cat CURRENT_CHANGELOG.md CHANGELOG_BODY.md >> TEMP_CHANGELOG.md
@@ -51,11 +51,8 @@ jobs:
       - name: Set Version Number
         id: set_version
         run: |
-          # Extract version number from the tag (e.g., 'v1.2.3' -> '1.2.3')
           VERSION=${{ github.ref_name }}
           VERSION=${VERSION#v}  # Remove 'v' prefix
-
-          # Set the extracted version as an environment variable
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: Create Release
