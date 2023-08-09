@@ -30,13 +30,9 @@ jobs:
       - name: Commit and Push Changelogs
         if: steps.build_changelog.outputs.changes > 0
         run: |
-          echo "Count of Changes: ${{ steps.build_changelog.outputs.changes }}"
-          echo "Count of Commits: ${{ steps.build_changelog.outputs.commits }}"
-          echo "Count of PRs: ${{ steps.build_changelog.outputs.pull_requests }}"
-          
           CURRENT_DATE=$(date +'%Y-%m-%d')
           BRANCH_URL=https://github.com/$GITHUB_REPOSITORY/tree/${{ github.ref_name }}
-          echo -e "\n<br/>\n" > CURRENT_CHANGELOG.md
+          echo -e "<br/>\n" > CURRENT_CHANGELOG.md
           echo "## Release [${{ github.ref_name }}]($BRANCH_URL)" >> CURRENT_CHANGELOG.md
           echo "Generated on $CURRENT_DATE" >> CURRENT_CHANGELOG.md
           cat CURRENT_CHANGELOG.md CHANGELOG_BODY.md >> TEMP_CHANGELOG.md
@@ -74,7 +70,7 @@ jobs:
             ## Packages
             
             - Maven Release: ${{ env.MAVEN_URL }}/${{ env.VERSION }}
-            - PyPI Package: ${{ env.PYPI_URL }}
+            - PyPI Package: ${{ env.PYPI_URL }}/${{ env.VERSION }}
             
             ## Changes
             ${{ steps.build_changelog.outputs.changelog }}
