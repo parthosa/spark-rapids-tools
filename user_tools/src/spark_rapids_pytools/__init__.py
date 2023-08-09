@@ -16,5 +16,5 @@
 
 from spark_rapids_pytools.build import get_version
 
-VERSION = '1.2.15'
+VERSION = '1.2.16'
 __version__ = get_version(VERSION)
