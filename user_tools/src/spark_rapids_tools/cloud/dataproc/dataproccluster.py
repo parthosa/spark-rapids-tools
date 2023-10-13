@@ -45,6 +45,13 @@ class DataprocGkeClusterSchema(PropValidatorSchemaCamel):
     virtual_cluster_config: dict
 
 
+class DataprocGkeClusterSchema(PropValidatorSchemaCamel):
+    cluster_name: str
+    cluster_uuid: str
+    project_id: str
+    config: dict
+
+
 @register_cluster_prop_mgr('dataproc')
 class DataprocClusterPropMgr(ClusterPropMgr):
     schema_clzz: ClassVar[Type[PropValidatorSchema]] = DataprocClusterSchema
@@ -62,4 +69,14 @@ class DataprocGkeClusterPropMgr(ClusterPropMgr):
 
 @register_client_cluster('dataproc_gke')
 class DataprocGkeClientCluster(ClientCluster):  # pylint: disable=too-few-public-methods
+    pass
+
+
+@register_cluster_prop_mgr('dataproc_gke')
+class DataprocGkeClusterPropMgr(ClusterPropMgr):
+    schema_clzz: ClassVar[Type[PropValidatorSchema]] = DataprocGkeClusterSchema
+
+
+@register_client_cluster('dataproc_gke')
+class DataprocGkeClientCluster(ClientCluster):   # pylint: disable=too-few-public-methods
     pass
