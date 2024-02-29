@@ -5,6 +5,9 @@
     "gceClusterConfig": {
       "zoneUri": "us-central1-a"
     },
+    "softwareConfig": {
+        "imageVersion": {{{ IMAGE }}}
+    },
     "masterConfig": {
       "instanceNames": [
         "test-node-d"
