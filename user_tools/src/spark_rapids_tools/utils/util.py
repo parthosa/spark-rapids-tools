@@ -1,4 +1,4 @@
-# Copyright (c) 2023, NVIDIA CORPORATION.
+# Copyright (c) 2023-2024, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -225,3 +225,22 @@ class Utilities:
         defined_version = Version(get_version(main=None))
         # get the release from version
         return cls.reformat_release_version(defined_version)
+
+    @classmethod
+    def extract_platform_gpu_name(cls, platform_key):
+        """
+        Extracts the platform name and GPU name (if present) from the given platform key.
+
+        Examples,
+           'dataproc' -> ('dataproc', None)
+           'dataproc_l4' -> ('dataproc','l4')
+           'databricks_aws' -> ('databricks_aws', None)
+           'databricks_aws_a100' -> ('databricks_aws', 'a100')
+        """
+        if platform_key:
+            parts = platform_key.split('_')
+            number_pattern = re.compile(r'.*\d.*')
+            # If the last part contains a number, we assume it is GPU name
+            if number_pattern.search(parts[-1]):
+                return '_'.join(parts[:-1]), parts[-1]
+        return platform_key, None

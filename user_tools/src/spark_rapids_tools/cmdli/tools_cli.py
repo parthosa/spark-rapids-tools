@@ -1,4 +1,4 @@
-# Copyright (c) 2023, NVIDIA CORPORATION.
+# Copyright (c) 2023-2024, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@
 
 import fire
 
+from spark_rapids_tools.cmdli.argprocessor import AbsToolUserArgModel
 from spark_rapids_tools.enums import QualGpuClusterReshapeType
-from spark_rapids_tools.utils.util import gen_app_banner, init_environment
+from spark_rapids_tools.utils.util import gen_app_banner, init_environment, Utilities
 from spark_rapids_pytools.common.utilities import Utils, ToolLogging
 from spark_rapids_pytools.rapids.bootstrap import Bootstrap
 from spark_rapids_pytools.rapids.profiling import ProfilingAsLocal
 from spark_rapids_pytools.rapids.qualification import QualificationAsLocal
-from .argprocessor import AbsToolUserArgModel
 
 
 class ToolsCLI(object):  # pylint: disable=too-few-public-methods
@@ -113,10 +113,11 @@ class ToolsCLI(object):  # pylint: disable=too-few-public-methods
         if verbose:
             ToolLogging.enable_debug_mode()
         init_environment('qual')
+        platform_name, gpu_name = Utilities.extract_platform_gpu_name(platform)
         qual_args = AbsToolUserArgModel.create_tool_args('qualification',
                                                          eventlogs=eventlogs,
                                                          cluster=cluster,
-                                                         platform=platform,
+                                                         platform=platform_name,
                                                          target_platform=target_platform,
                                                          output_folder=output_folder,
                                                          filter_apps=filter_apps,
@@ -125,7 +126,8 @@ class ToolsCLI(object):  # pylint: disable=too-few-public-methods
                                                          cpu_discount=cpu_discount,
                                                          gpu_discount=gpu_discount,
                                                          global_discount=global_discount,
-                                                         gpu_cluster_recommendation=gpu_cluster_recommendation)
+                                                         gpu_cluster_recommendation=gpu_cluster_recommendation,
+                                                         gpu_name=gpu_name)
         if qual_args:
             tool_obj = QualificationAsLocal(platform_type=qual_args['runtimePlatform'],
                                             output_folder=qual_args['outputFolder'],
@@ -172,11 +174,13 @@ class ToolsCLI(object):  # pylint: disable=too-few-public-methods
         if verbose:
             ToolLogging.enable_debug_mode()
         init_environment('prof')
+        platform_name, gpu_name = Utilities.extract_platform_gpu_name(platform)
         prof_args = AbsToolUserArgModel.create_tool_args('profiling',
                                                          eventlogs=eventlogs,
                                                          cluster=cluster,
-                                                         platform=platform,
-                                                         output_folder=output_folder)
+                                                         platform=platform_name,
+                                                         output_folder=output_folder,
+                                                         gpu_name=gpu_name)
         if prof_args:
             tool_obj = ProfilingAsLocal(platform_type=prof_args['runtimePlatform'],
                                         output_folder=prof_args['outputFolder'],
@@ -208,11 +212,13 @@ class ToolsCLI(object):  # pylint: disable=too-few-public-methods
         if verbose:
             ToolLogging.enable_debug_mode()
         init_environment('boot')
+        platform_name, gpu_name = Utilities.extract_platform_gpu_name(platform)
         boot_args = AbsToolUserArgModel.create_tool_args('bootstrap',
                                                          cluster=cluster,
-                                                         platform=platform,
+                                                         platform=platform_name,
                                                          output_folder=output_folder,
-                                                         dry_run=dry_run)
+                                                         dry_run=dry_run,
+                                                         gpu_name=gpu_name)
         if boot_args:
             tool_obj = Bootstrap(platform_type=boot_args['runtimePlatform'],
                                  cluster=cluster,

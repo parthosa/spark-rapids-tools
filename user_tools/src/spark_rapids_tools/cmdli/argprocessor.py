@@ -1,4 +1,4 @@
-# Copyright (c) 2023, NVIDIA CORPORATION.
+# Copyright (c) 2023-2024, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ from pydantic_core import PydanticCustomError
 
 from spark_rapids_tools.cloud import ClientCluster
 from spark_rapids_tools.utils import AbstractPropContainer, is_http_file
-from spark_rapids_pytools.cloud_api.sp_types import DeployMode
+from spark_rapids_pytools.cloud_api.sp_types import DeployMode, GpuDevice
 from spark_rapids_pytools.common.utilities import ToolLogging
 from spark_rapids_pytools.rapids.qualification import QualGpuClusterReshapeType
 from ..enums import QualFilterApp, CspEnv
@@ -95,6 +95,7 @@ class AbsToolUserArgModel:
     cluster: Optional[str] = None
     platform: Optional[CspEnv] = None
     output_folder: Optional[str] = None
+    gpu_name: Optional[str] = None
     rejected: dict = dataclasses.field(init=False, default_factory=dict)
     detected: dict = dataclasses.field(init=False, default_factory=dict)
     extra: dict = dataclasses.field(init=False, default_factory=dict)
@@ -413,6 +414,7 @@ class QualifyUserArgModel(ToolUserArgModel):
             'platformOpts': {
                 'credentialFile': None,
                 'deployMode': DeployMode.LOCAL,
+                'gpuDevice': GpuDevice.fromstring(self.gpu_name) if self.gpu_name is not None else None,
                 # used to be sent to the scala core java cmd
                 'targetPlatform': self.p_args['toolArgs']['targetPlatform']
             },
@@ -504,6 +506,7 @@ class ProfileUserArgModel(ToolUserArgModel):
             'platformOpts': {
                 'credentialFile': None,
                 'deployMode': DeployMode.LOCAL,
+                'gpuDevice': GpuDevice.fromstring(self.gpu_name) if self.gpu_name is not None else None,
             },
             'migrationClustersProps': {
                 'gpuCluster': self.p_args['toolArgs']['cluster']
@@ -535,7 +538,9 @@ class BootstrapUserArgModel(AbsToolUserArgModel):
         return {
             'runtimePlatform': self.platform,
             'outputFolder': self.output_folder,
-            'platformOpts': {},
+            'platformOpts': {
+                'gpuDevice': GpuDevice.fromstring(self.gpu_name) if self.gpu_name is not None else None,
+            },
             'dryRun': self.dry_run
         }
 
