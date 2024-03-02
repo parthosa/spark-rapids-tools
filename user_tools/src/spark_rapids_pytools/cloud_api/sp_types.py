@@ -259,6 +259,14 @@ class ClusterGetAccessor:
         node = self.get_node(node_type)
         return node.hw_info.sys_info.cpu_mem
 
+    def get_node_num_local_ssds(self, node_type: SparkNodeType) -> int:
+        node = self.get_node(node_type)
+        return node.hw_info.sys_info.num_local_ssd
+
+    def get_node_storage_interface(self, node_type: SparkNodeType) -> StorageInterface:
+        node = self.get_node(node_type)
+        return node.hw_info.sys_info.storage_interface
+
     def get_gpu_per_node(self, node_type: SparkNodeType) -> (int, str):
         node = self.get_node(node_type)
         gpu_info = node.hw_info.gpu_info
@@ -1139,13 +1147,13 @@ class ClusterBase(ClusterGetAccessor):
     def get_tmp_storage(self) -> str:
         raise NotImplementedError
 
-    def _set_render_args_create_template(self) -> dict:
+    def _set_render_args_create_template(self, overridden_args: dict = None) -> dict:
         raise NotImplementedError
 
-    def generate_create_script(self) -> str:
+    def generate_create_script(self, overridden_args: dict = None) -> str:
         platform_name = CspEnv.pretty_print(self.platform.type_id)
         template_path = Utils.resource_path(f'templates/{platform_name}-create_gpu_cluster_script.ms')
-        render_args = self._set_render_args_create_template()
+        render_args = self._set_render_args_create_template(overridden_args)
         return TemplateGenerator.render_template_file(template_path, render_args)
 
     def _set_render_args_bootstrap_template(self, overridden_args: dict = None) -> dict:
@@ -1166,13 +1174,13 @@ class ClusterBase(ClusterGetAccessor):
         template_path = Utils.resource_path(f'templates/cluster_template/{platform_name}_node.ms')
         return TemplateGenerator.render_template_file(template_path, render_args)
 
-    def _set_render_args_init_template(self) -> dict:
+    def _set_render_args_init_template(self, overridden_args: dict = None) -> dict:
         raise NotImplementedError
 
-    def generate_init_script(self) -> str:
+    def generate_init_script(self, overridden_args: dict = None) -> str:
         platform_name = CspEnv.pretty_print(self.platform.type_id)
         template_path = Utils.resource_path(f'templates/{platform_name}-init_gpu_cluster_script.ms')
-        render_args = self._set_render_args_init_template()
+        render_args = self._set_render_args_init_template(overridden_args)
         return TemplateGenerator.render_template_file(template_path, render_args)
 
 
@@ -1195,6 +1203,9 @@ class ClusterReshape(ClusterGetAccessor):
     reshape_workers_cnt: Callable[[int], int] = field(default_factory=lambda: lambda x: x)
     reshape_workers_cpus: Callable[[int], int] = field(default_factory=lambda: lambda x: x)
     reshape_workers_mem: Callable[[int], int] = field(default_factory=lambda: lambda x: x)
+    reshape_workers_num_local_ssds: Callable[[int], int] = field(default_factory=lambda: lambda x: x)
+    reshape_workers_storage_interface: Callable[[StorageInterface], StorageInterface] = field(
+        default_factory=lambda: lambda x: x)
     reshape_workers_gpu_cnt: Callable[[int], int] = field(default_factory=lambda: lambda x: x)
     reshape_workers_gpu_device: Callable[[str], str] = field(default_factory=lambda: lambda x: x)
 
@@ -1230,6 +1241,18 @@ class ClusterReshape(ClusterGetAccessor):
             return self.reshape_workers_mem(res)
         return res
 
+    def get_node_num_local_ssds(self, node_type: SparkNodeType) -> int:
+        res = super().get_node_num_local_ssds(node_type)
+        if node_type in self.node_types:
+            return self.reshape_workers_num_local_ssds(res)
+        return res
+
+    def get_node_storage_interface(self, node_type: SparkNodeType) -> StorageInterface:
+        res = super().get_node_storage_interface(node_type)
+        if node_type in self.node_types:
+            return self.reshape_workers_storage_interface(res)
+        return res
+
     def get_gpu_per_node(self, node_type: SparkNodeType) -> (int, str):
         num_gpus, gpu_device = super().get_gpu_per_node(node_type)
         if node_type in self.node_types:
@@ -1238,6 +1261,17 @@ class ClusterReshape(ClusterGetAccessor):
 
     def get_name(self) -> str:
         return self.cluster_inst.get_name()
+
+    def get_render_args(self) -> dict:
+        gpu_per_machine, gpu_device = self.get_gpu_per_node(SparkNodeType.WORKER)
+        return {
+            'WORKERS_COUNT': self.get_nodes_cnt(SparkNodeType.WORKER),
+            'WORKERS_MACHINE': self.get_node_instance_type(SparkNodeType.WORKER),
+            'LOCAL_SSD': self.get_node_num_local_ssds(SparkNodeType.WORKER),
+            'STORAGE_INTERFACE': self.get_node_storage_interface(SparkNodeType.WORKER),
+            'GPU_DEVICE': gpu_device,
+            'GPU_PER_WORKER': gpu_per_machine
+        }
 
 
 def get_platform(platform_id: Enum) -> Type[PlatformBase]:

@@ -463,16 +463,17 @@ class EMRCluster(ClusterBase):
     def get_image_version(self) -> str:
         return self.props.get_value('ReleaseLabel')
 
-    def _set_render_args_create_template(self) -> dict:
-        worker_node = self.get_worker_node()
-        return {
+    def _set_render_args_create_template(self, overridden_args: dict = None) -> dict:
+        render_args = {
             'CLUSTER_NAME': self.get_name(),
+            'REGION': self.region,
             'ZONE': self.zone,
             'IMAGE': self.get_image_version(),
-            'MASTER_MACHINE': self.get_master_node().instance_type,
-            'WORKERS_COUNT': self.get_workers_count(),
-            'WORKERS_MACHINE': worker_node.instance_type
+            'MASTER_MACHINE': self.get_master_node().instance_type
         }
+        if overridden_args:
+            render_args.update(overridden_args)
+        return render_args
 
 
 @dataclass

@@ -278,7 +278,7 @@ class OnPremCluster(ClusterBase):
         }
         self.platform.update_ctxt_notes('nodeConversions', mc_type_map)
 
-    def _set_render_args_create_template(self) -> dict:
+    def _set_render_args_create_template(self, overridden_args: dict = None) -> dict:
         pass
 
     def get_all_spark_properties(self) -> dict:
@@ -287,7 +287,7 @@ class OnPremCluster(ClusterBase):
     def get_tmp_storage(self) -> str:
         pass
 
-    def _set_render_args_init_template(self) -> dict:
+    def _set_render_args_init_template(self, overridden_args: dict = None) -> dict:
         pass
 
 

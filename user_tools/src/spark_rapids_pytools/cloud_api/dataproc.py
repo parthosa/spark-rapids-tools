@@ -530,35 +530,34 @@ class DataprocCluster(ClusterBase):
                                                GpuDevice.fromstring(gpu_device),
                                                'fullName')
 
-    def _set_render_args_create_template(self) -> dict:
-        worker_node = self.get_worker_node()
-        gpu_per_machine, gpu_device = self.get_gpu_per_worker()
-        return {
+    def _set_render_args_create_template(self, overridden_args: dict = None) -> dict:
+        render_args = {
             'CLUSTER_NAME': self.get_name(),
             'REGION': self.region,
             'ZONE': self.zone,
             'IMAGE': self.get_image_version(),
-            'MASTER_MACHINE': self.get_master_node().instance_type,
-            'WORKERS_COUNT': self.get_workers_count(),
-            'WORKERS_MACHINE': worker_node.instance_type,
-            'LOCAL_SSD': worker_node.hw_info.sys_info.num_local_ssd,
-            'STORAGE_INTERFACE': worker_node.hw_info.sys_info.storage_interface.upper(),
-            'GPU_DEVICE': self._get_gpu_device_name(gpu_device),
-            'GPU_PER_WORKER': gpu_per_machine
+            'MASTER_MACHINE': self.get_master_node().instance_type
         }
+        if overridden_args:
+            render_args.update(overridden_args)
+            gpu_device = overridden_args.get('GPU_DEVICE')
+            if gpu_device:
+                gpu_device_name = self._get_gpu_device_name(gpu_device)
+                render_args['GPU_DEVICE'] = gpu_device_name
+        return render_args
 
-    def _set_render_args_init_template(self) -> dict:
+    def _set_render_args_init_template(self, overridden_args: dict = None) -> dict:
         """
         Create arguments for the cluster initialization template
         """
-        worker_node = self.get_worker_node()
-        gpu_per_machine, gpu_device = self.get_gpu_per_worker()
-        return {
-            'REGION': self.region,
-            'WORKERS_MACHINE': worker_node.instance_type,
-            'GPU_DEVICE': self._get_gpu_device_name(gpu_device),
-            'GPU_PER_WORKER': gpu_per_machine
-        }
+        render_args = {'REGION': self.region}
+        if overridden_args:
+            render_args.update(overridden_args)
+            gpu_device = overridden_args.get('GPU_DEVICE')
+            if gpu_device:
+                gpu_device_name = self._get_gpu_device_name(gpu_device)
+                render_args['GPU_DEVICE'] = gpu_device_name
+        return render_args
 
 
 @dataclass

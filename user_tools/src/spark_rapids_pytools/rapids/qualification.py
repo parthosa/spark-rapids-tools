@@ -629,6 +629,7 @@ class Qualification(RapidsJarTool):
                 # create the object and add it to the caching dict
                 reshaped_cluster = ClusterReshape(self.ctxt.get_ctxt('gpuClusterProxy'),
                                                   reshape_workers_cnt=lambda x: workers_cnt)
+                self.ctxt.set_ctxt('reshapedGpuClusterProxy', reshaped_cluster)
                 estimator_obj = self.ctxt.platform.create_saving_estimator(self.ctxt.get_ctxt('cpuClusterProxy'),
                                                                            reshaped_cluster,
                                                                            self.ctxt.get_ctxt('target_cost'),
@@ -641,6 +642,7 @@ class Qualification(RapidsJarTool):
         if not cost_per_row:
             # initialize the savings estimator only once
             reshaped_gpu_cluster = ClusterReshape(self.ctxt.get_ctxt('gpuClusterProxy'))
+            self.ctxt.set_ctxt('reshapedGpuClusterProxy', reshaped_gpu_cluster)
             savings_estimator = self.ctxt.platform.create_saving_estimator(self.ctxt.get_ctxt('cpuClusterProxy'),
                                                                            reshaped_gpu_cluster,
                                                                            self.ctxt.get_ctxt('target_cost'),
@@ -806,13 +808,15 @@ class Qualification(RapidsJarTool):
         #      this requires that we allow to generate the script without the gpu-cluster
         if sec_conf.get('sectionID') == 'initializationScript':
             # TODO: We need to use reshaped cluster here instead of gpu cluster proxy.
-            gpu_cluster = self.ctxt.get_ctxt('gpuClusterProxy')
-            script_content = gpu_cluster.generate_init_script()
+            reshaped_cluster = self.ctxt.get_ctxt('reshapedGpuClusterProxy')
+            override_args = reshaped_cluster.get_render_args()
+            script_content = reshaped_cluster.cluster_inst.generate_init_script(overridden_args=override_args)
             return [script_content]
         if sec_conf.get('sectionID') == 'gpuClusterCreationScript':
             # TODO: We need to use reshaped cluster here instead of gpu cluster proxy.
-            gpu_cluster = self.ctxt.get_ctxt('gpuClusterProxy')
-            script_content = gpu_cluster.generate_create_script()
+            reshaped_cluster = self.ctxt.get_ctxt('reshapedGpuClusterProxy')
+            override_args = reshaped_cluster.get_render_args()
+            script_content = reshaped_cluster.cluster_inst.generate_create_script(overridden_args=override_args)
             highlighted_code = TemplateGenerator.highlight_bash_code(script_content)
             return ['```bash', highlighted_code, '```']
         if sec_conf.get('sectionID') == 'runUserToolsBootstrap':
