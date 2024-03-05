@@ -546,19 +546,6 @@ class DataprocCluster(ClusterBase):
                 render_args['GPU_DEVICE'] = gpu_device_name
         return render_args
 
-    def _set_render_args_init_template(self, overridden_args: dict = None) -> dict:
-        """
-        Create arguments for the cluster initialization template
-        """
-        render_args = {'REGION': self.region}
-        if overridden_args:
-            render_args.update(overridden_args)
-            gpu_device = overridden_args.get('GPU_DEVICE')
-            if gpu_device:
-                gpu_device_name = self._get_gpu_device_name(gpu_device)
-                render_args['GPU_DEVICE'] = gpu_device_name
-        return render_args
-
 
 @dataclass
 class DataprocSavingsEstimator(SavingsEstimator):
