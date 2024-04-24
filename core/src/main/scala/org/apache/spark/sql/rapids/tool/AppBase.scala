@@ -36,7 +36,7 @@ import org.apache.spark.scheduler.{SparkListenerEnvironmentUpdate, SparkListener
 import org.apache.spark.sql.execution.SparkPlanInfo
 import org.apache.spark.sql.execution.ui.SparkPlanGraphNode
 import org.apache.spark.sql.rapids.tool.qualification.MLFunctions
-import org.apache.spark.sql.rapids.tool.util.{EventUtils, RapidsToolsConfUtil, ToolsPlanGraph}
+import org.apache.spark.sql.rapids.tool.util.{EventUtils, RapidsToolsConfUtil, RocksDBClient, ToolsPlanGraph}
 import org.apache.spark.util.Utils
 import org.apache.spark.util.Utils.REDACTION_REPLACEMENT_TEXT
 
@@ -168,8 +168,8 @@ abstract class AppBase(
   var sqlPlans: HashMap[Long, SparkPlanInfo] = HashMap.empty[Long, SparkPlanInfo]
 
   // accum id to task stage accum info
-  var taskStageAccumMap: HashMap[Long, ArrayBuffer[TaskStageAccumCase]] =
-    HashMap[Long, ArrayBuffer[TaskStageAccumCase]]()
+  lazy val taskStageAccumMap = new RocksDBClient[ArrayBuffer[TaskStageAccumCase]](
+    s"taskStageAccumMap_$appId")
 
   val stageIdToInfo: HashMap[(Int, Int), StageInfoClass] = new HashMap[(Int, Int), StageInfoClass]()
   val accumulatorToStages: HashMap[Long, Set[Int]] = new HashMap[Long, Set[Int]]()
