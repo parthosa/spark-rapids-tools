@@ -32,7 +32,41 @@ from xgboost.core import XGBoostError
 
 from spark_rapids_pytools.common.utilities import Utils
 
+
+class CustomFormatter(logging.Formatter):
+    def format(self, record):
+        record.line_number = record.lineno
+        if hasattr(record, 'exc_text') and record.exc_text:
+            exc_lines = record.exc_text.splitlines()
+            record.exc_text = '\n'.join(exc_lines[-3:])  # Only keep the last 3 lines
+        else:
+            record.exc_text = ""
+        return super(CustomFormatter, self).format(record)
+
+    def formatException(self, exc_info):
+        result = super(CustomFormatter, self).formatException(exc_info)
+        return result if isinstance(result, str) else ''.join(result)
+
+
+class CustomHandler(logging.StreamHandler):
+    def handleError(self, record):
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        if exc_type is not None:
+            record.exc_text = self.formatter.formatException((exc_type, exc_value, exc_traceback))
+        super(CustomHandler, self).handleError(record)
+
+
+# Configure the logger
 logger = logging.getLogger(__name__)
+handler = CustomHandler()
+
+# Create a custom formatter
+formatter = CustomFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s [Line: %(line_number)d]\n%(exc_text)s')
+handler.setFormatter(formatter)
+
+logger.addHandler(handler)
+logger.setLevel(logging.DEBUG)
+
 FILTER_SPILLS = False  # remove queries with any disk/mem spills
 LOG_LABEL = True  # use log(y) as target
 INTERMEDIATE_DATA_ENABLED = False
@@ -249,6 +283,7 @@ class RegexPattern:
     qual_tool = re.compile(r'^qual_[0-9]+_[0-9a-zA-Z]+$')
     rapids_profile = re.compile(r'rapids_4_spark_profile')
     rapids_qual_tool = re.compile(r'rapids_4_spark_qualification_output')
+    raw_metrics = re.compile(r'raw_metrics')
 
 
 def find_paths(folder, filter_fn=None, return_directories=False):
@@ -323,12 +358,19 @@ def load_qtool_execs(qtool_execs: List[str]) -> Optional[pd.DataFrame]:
 
 def get_qual_data(qual: Optional[str]):
     if not qual:
-        return None, None, None
+        return None, None, None, None
 
     # load qual tool execs
     qual_list = find_paths(
         qual, RegexPattern.rapids_qual_tool.match, return_directories=True
     )
+
+    raw_metrics = [
+        path
+        for q in qual_list
+        for path in find_paths(q, RegexPattern.raw_metrics.match, return_directories=True)
+    ]
+
     qual_execs = [
         os.path.join(
             q,
@@ -352,7 +394,7 @@ def get_qual_data(qual: Optional[str]):
         ['App ID', 'Estimated GPU Speedup'],
     )
 
-    return node_level_supp, qual_app_preds, qual_sql_preds
+    return raw_metrics, node_level_supp, qual_app_preds, qual_sql_preds
 
 
 def safe_load_csv_files(
@@ -1213,7 +1255,7 @@ def predict_model(
     shap_values = explainer.shap_values(x_dim)
     shap_vals = np.abs(shap_values).mean(axis=0)
     feature_importance = pd.DataFrame(
-            list(zip(feature_cols, shap_vals)), columns=['feature', 'shap_value']
+        list(zip(feature_cols, shap_vals)), columns=['feature', 'shap_value']
     )
     feature_importance.sort_values(by=['shap_value'], ascending=False, inplace=True)
     shap_values_path = output_info['shapValues']['path']
@@ -1391,17 +1433,17 @@ def predict(platform: str = 'onprem',
             output_info: Optional[dict] = None,
             qualtool_filter: Optional[str] = 'stage') -> pd.DataFrame:
     xgb_model = _get_model(platform)
-    node_level_supp, _, _ = get_qual_data(qual)
+    profile_list, node_level_supp, _, _ = get_qual_data(qual)
 
     # preprocess profiles
-    if profile:
-        profile_list = find_paths(
-            profile,
-            RegexPattern.rapids_profile.match,
-            return_directories=True,
-        )
+    if len(profile_list) > 0:
+        # profile_list = find_paths(
+        #     profile,
+        #     RegexPattern.rapids_profile.match,
+        #     return_directories=True,
+        # )
         # use parent directory of `rapids_4_spark_profile`
-        profile_list = [Path(p).parent for p in profile_list]
+        # profile_list = [Path(p).parent for p in profile_list]
         processed_dfs = {}
         for prof in profile_list:
             datasets = {}
