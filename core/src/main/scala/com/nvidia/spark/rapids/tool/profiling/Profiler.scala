@@ -488,9 +488,9 @@ class Profiler(hadoopConf: Configuration, appArgs: ProfileArgs, enablePB: Boolea
     }
     sums.foreach { app: ApplicationSummaryInfo =>
       profileOutputWriter.writeText("### A. Information Collected ###")
-      profileOutputWriter.write("Application Information", app.appInfo)
+      profileOutputWriter.write(ProfInformationView.getLabel, app.appInfo)
       profileOutputWriter.write("Application Log Path Mapping", app.appLogPath)
-      profileOutputWriter.write("Data Source Information", app.dsInfo)
+      profileOutputWriter.write(ProfDataSourceView.getLabel, app.dsInfo)
       profileOutputWriter.write(ProfExecutorView.getLabel, app.execInfo)
       profileOutputWriter.write(ProfJobsView.getLabel, app.jobInfo)
       profileOutputWriter.write(ProfSQLToStageView.getLabel, app.sqlStageInfo)

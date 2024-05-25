@@ -71,6 +71,8 @@ object QualRawReportGenerator {
       new ProfileOutputWriter(metricsDirectory, "profile", 10000000, outputCSV = true)
     try {
       pWriter.writeText("### A. Information Collected ###")
+      pWriter.write(QualInformationView.getLabel, QualInformationView.getRawView(Seq(app)))
+      pWriter.write(QualDataSourceView.getLabel, QualDataSourceView.getRawView(Seq(app)))
       pWriter.write(QualExecutorView.getLabel, QualExecutorView.getRawView(Seq(app)))
       pWriter.write(QualAppJobView.getLabel, QualAppJobView.getRawView(Seq(app)))
       generateSQLProcessingView(pWriter, app, appIndex)

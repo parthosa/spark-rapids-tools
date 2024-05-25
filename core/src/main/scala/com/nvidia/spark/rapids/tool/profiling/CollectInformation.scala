@@ -19,7 +19,7 @@ package com.nvidia.spark.rapids.tool.profiling
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 import com.nvidia.spark.rapids.tool.ToolTextFileWriter
-import com.nvidia.spark.rapids.tool.views.{ProfExecutorView, ProfJobsView, ProfSQLCodeGenView, ProfSQLPlanAlignedView, ProfSQLPlanMetricsView, ProfSQLToStageView}
+import com.nvidia.spark.rapids.tool.views.{ProfDataSourceView, ProfExecutorView, ProfInformationView, ProfJobsView, ProfSQLCodeGenView, ProfSQLPlanAlignedView, ProfSQLPlanMetricsView, ProfSQLToStageView}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.rapids.tool.ToolUtils
@@ -34,18 +34,7 @@ case class StageMetrics(numTasks: Int, duration: String)
 class CollectInformation(apps: Seq[ApplicationInfo]) extends Logging {
 
   def getAppInfo: Seq[AppInfoProfileResults] = {
-    val allRows = apps.collect {
-      case app if app.isAppMetaDefined =>
-        val a = app.appMetaData.get
-        AppInfoProfileResults(app.index, a.appName, a.appId,
-          a.sparkUser,  a.startTime, a.endTime, app.getAppDuration,
-          a.getDurationString, app.sparkVersion, app.gpuMode)
-    }
-    if (allRows.nonEmpty) {
-      allRows.sortBy(cols => (cols.appIndex))
-    } else {
-      Seq.empty
-    }
+    ProfInformationView.getRawView(apps)
   }
 
   def getAppLogPath: Seq[AppLogPathProfileResults] = {
@@ -88,60 +77,7 @@ class CollectInformation(apps: Seq[ApplicationInfo]) extends Logging {
 
   // get read data schema information
   def getDataSourceInfo: Seq[DataSourceProfileResult] = {
-    val dataSourceApps = apps.filter(_.dataSourceInfo.nonEmpty)
-    val sqlAccums = CollectInformation.generateSQLAccums(dataSourceApps)
-
-    // Metrics to capture from event log to the result
-    val buffer_time: String = "buffer time"
-    val scan_time = "scan time"
-    val data_size = "size of files read"
-    val decode_time = "GPU decode time"
-
-    // This is to save the metrics which will be extracted while creating the result.
-    case class IoMetrics(
-        var buffer_time: Long,
-        var scan_time: Long,
-        var data_size: Long,
-        var decode_time: Long)
-
-    def getIoMetrics(sqlAccums: Seq[SQLAccumProfileResults]): IoMetrics = {
-      val finalRes = IoMetrics(0, 0, 0, 0)
-      sqlAccums.map(accum => accum.name match {
-        case `buffer_time` => finalRes.buffer_time = accum.total
-        case `scan_time` => finalRes.scan_time = accum.total
-        case `data_size` => finalRes.data_size = accum.total
-        case `decode_time` => finalRes.decode_time = accum.total
-      })
-      finalRes
-    }
-
-    val allRows = dataSourceApps.flatMap { app =>
-      val appSqlAccums = sqlAccums.filter(sqlAccum => sqlAccum.appIndex == app.index)
-
-      // Filter appSqlAccums to get only required metrics
-      val dataSourceMetrics = appSqlAccums.filter(sqlAccum => sqlAccum.name.contains(buffer_time)
-        || sqlAccum.name.contains(scan_time) || sqlAccum.name.contains(decode_time)
-        || sqlAccum.name.equals(data_size))
-
-      app.dataSourceInfo.map { ds =>
-        val sqlIdtoDs = dataSourceMetrics.filter(
-          sqlAccum => sqlAccum.sqlID == ds.sqlID && sqlAccum.nodeID == ds.nodeId)
-        if (!sqlIdtoDs.isEmpty) {
-          val ioMetrics = getIoMetrics(sqlIdtoDs)
-          DataSourceProfileResult(app.index, ds.sqlID, ds.nodeId,
-            ds.format, ioMetrics.buffer_time, ioMetrics.scan_time, ioMetrics.data_size,
-            ioMetrics.decode_time, ds.location, ds.pushedFilters, ds.schema)
-        } else {
-          DataSourceProfileResult(app.index, ds.sqlID, ds.nodeId,
-            ds.format, 0, 0, 0, 0, ds.location, ds.pushedFilters, ds.schema)
-        }
-      }
-    }
-    if (allRows.size > 0) {
-      allRows.sortBy(cols => (cols.appIndex, cols.sqlID, cols.location, cols.schema))
-    } else {
-      Seq.empty
-    }
+    ProfDataSourceView.getRawView(apps)
   }
 
   // get executor related information
