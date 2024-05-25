@@ -19,11 +19,11 @@ package com.nvidia.spark.rapids.tool.profiling
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 import com.nvidia.spark.rapids.tool.ToolTextFileWriter
-import com.nvidia.spark.rapids.tool.views.{ProfDataSourceView, ProfExecutorView, ProfInformationView, ProfJobsView, ProfSQLCodeGenView, ProfSQLPlanAlignedView, ProfSQLPlanMetricsView, ProfSQLToStageView}
+import com.nvidia.spark.rapids.tool.views._
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.rapids.tool.ToolUtils
 import org.apache.spark.sql.rapids.tool.profiling.ApplicationInfo
+
 
 case class StageMetrics(numTasks: Int, duration: String)
 
@@ -38,41 +38,12 @@ class CollectInformation(apps: Seq[ApplicationInfo]) extends Logging {
   }
 
   def getAppLogPath: Seq[AppLogPathProfileResults] = {
-    val allRows = apps.collect {
-      case app if app.isAppMetaDefined => val a = app.appMetaData.get
-      AppLogPathProfileResults(app.index, a.appName, a.appId, app.getEventLogPath)
-    }
-    if (allRows.nonEmpty) {
-      allRows.sortBy(cols => cols.appIndex)
-    } else {
-      Seq.empty
-    }
+    ProfLogPathView.getRawView(apps)
   }
 
   // get rapids-4-spark and cuDF jar if CPU Mode is on.
   def getRapidsJARInfo: Seq[RapidsJarProfileResult] = {
-    val allRows = apps.flatMap { app =>
-      if (app.gpuMode) {
-        // Look for rapids-4-spark and cuDF jar in classPathEntries
-        val rapidsJars = app.classpathEntries.filterKeys(_ matches ToolUtils.RAPIDS_JAR_REGEX.regex)
-        if (rapidsJars.nonEmpty) {
-          val cols = rapidsJars.keys.toSeq
-          cols.map(jar => RapidsJarProfileResult(app.index, jar))
-        } else {
-          // Look for the rapids-4-spark and cuDF jars in Spark Properties
-          ToolUtils.extractRAPIDSJarsFromProps(app.sparkProperties).map {
-            jar => RapidsJarProfileResult(app.index, jar)
-          }
-        }
-      } else {
-        Seq.empty
-      }
-    }
-    if (allRows.size > 0) {
-      allRows.sortBy(cols => (cols.appIndex, cols.jar))
-    } else {
-      Seq.empty
-    }
+    ProfRapidsJarView.getRawView(apps)
   }
 
   // get read data schema information
@@ -94,50 +65,14 @@ class CollectInformation(apps: Seq[ApplicationInfo]) extends Logging {
     ProfSQLToStageView.getRawView(apps)
   }
 
-  /**
-   * Print RAPIDS related or all Spark Properties when the propSource is set to "rapids".
-   * Note that RAPIDS related properties are not necessarily starting with prefix 'spark.rapids'.
-   * This table is inverse of the other tables where the row keys are property keys and the columns
-   * are the application values. So column1 would be all the key values for app index 1.
-   * @param propSource defines which type of properties to be retrieved the properties from.
-   *                   It can be: rapids, spark, or system
-   * @return List of properties relevant to the source.
-   */
-  private def getProperties(propSource: String): Seq[RapidsPropertyProfileResult] = {
-    val outputHeaders = ArrayBuffer("propertyName")
-    val props = HashMap[String, ArrayBuffer[String]]()
-    var numApps = 0
-    apps.foreach { app =>
-      numApps += 1
-      outputHeaders += s"appIndex_${app.index}"
-      val propsToKeep = if (propSource.equals("rapids")) {
-        app.sparkProperties.filterKeys { ToolUtils.isRapidsPropKey(_) }
-      } else if (propSource.equals("spark")) {
-        // remove the rapids related ones
-        app.sparkProperties.filterKeys(key => !key.contains(ToolUtils.PROPS_RAPIDS_KEY_PREFIX))
-      } else {
-        // get the system properties
-        app.systemProperties
-      }
-      CollectInformation.addNewProps(propsToKeep, props, numApps)
-    }
-    val allRows = props.map { case (k, v) => Seq(k) ++ v }.toSeq
-    if (allRows.nonEmpty) {
-      val resRows = allRows.map(r => RapidsPropertyProfileResult(r(0), outputHeaders, r))
-      resRows.sortBy(cols => cols.key)
-    } else {
-      Seq.empty
-    }
-  }
-
   def getRapidsProperties: Seq[RapidsPropertyProfileResult] = {
-    getProperties("rapids")
+    ProfPropertiesView("rapids").getRawView(apps)
   }
   def getSparkProperties: Seq[RapidsPropertyProfileResult] = {
-    getProperties("spark")
+    ProfPropertiesView("spark").getRawView(apps)
   }
   def getSystemProperties: Seq[RapidsPropertyProfileResult] = {
-    getProperties("system")
+    ProfPropertiesView("system").getRawView(apps)
   }
 
   // Print SQL whole stage code gen mapping

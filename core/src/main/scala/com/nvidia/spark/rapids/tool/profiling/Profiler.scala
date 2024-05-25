@@ -489,18 +489,18 @@ class Profiler(hadoopConf: Configuration, appArgs: ProfileArgs, enablePB: Boolea
     sums.foreach { app: ApplicationSummaryInfo =>
       profileOutputWriter.writeText("### A. Information Collected ###")
       profileOutputWriter.write(ProfInformationView.getLabel, app.appInfo)
-      profileOutputWriter.write("Application Log Path Mapping", app.appLogPath)
+      profileOutputWriter.write(ProfLogPathView.getLabel, app.appLogPath)
       profileOutputWriter.write(ProfDataSourceView.getLabel, app.dsInfo)
       profileOutputWriter.write(ProfExecutorView.getLabel, app.execInfo)
       profileOutputWriter.write(ProfJobsView.getLabel, app.jobInfo)
       profileOutputWriter.write(ProfSQLToStageView.getLabel, app.sqlStageInfo)
-      profileOutputWriter.write("Spark Rapids parameters set explicitly", app.rapidsProps,
+      profileOutputWriter.write(ProfPropertiesView("rapids").getLabel, app.rapidsProps,
         Some("Spark Rapids parameters"))
-      profileOutputWriter.write("Spark Properties", app.sparkProps,
+      profileOutputWriter.write(ProfPropertiesView("spark").getLabel, app.sparkProps,
         Some("Spark Properties"))
-      profileOutputWriter.write("System Properties", app.sysProps,
+      profileOutputWriter.write(ProfPropertiesView("system").getLabel, app.sysProps,
         Some("System Properties"))
-      profileOutputWriter.write("Rapids Accelerator Jar and cuDF Jar", app.rapidsJar,
+      profileOutputWriter.write(ProfRapidsJarView.getLabel, app.rapidsJar,
         Some("Rapids 4 Spark Jars"))
       profileOutputWriter.write(ProfSQLPlanMetricsView.getLabel, app.sqlMetrics,
         Some(ProfSQLPlanMetricsView.getDescription))

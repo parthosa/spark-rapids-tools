@@ -17,9 +17,9 @@
 package com.nvidia.spark.rapids.tool.views
 
 import com.nvidia.spark.rapids.tool.analysis.{ProfAppIndexMapperTrait, QualAppIndexMapperTrait}
-import com.nvidia.spark.rapids.tool.profiling.AppInfoProfileResults
+import com.nvidia.spark.rapids.tool.profiling.{AppInfoProfileResults, AppLogPathProfileResults, RapidsJarProfileResult}
 
-import org.apache.spark.sql.rapids.tool.AppBase
+import org.apache.spark.sql.rapids.tool.{AppBase, ToolUtils}
 
 
 trait AppInformationViewTrait extends ViewableTrait[AppInfoProfileResults] {
@@ -43,5 +43,64 @@ object QualInformationView extends AppInformationViewTrait with QualAppIndexMapp
 }
 
 object ProfInformationView extends AppInformationViewTrait with ProfAppIndexMapperTrait {
+  // Keep for the following refactor stages to customize the view based on the app type (Qual/Prof)
+}
+
+
+trait AppLogPathViewTrait extends ViewableTrait[AppLogPathProfileResults] {
+  override def getLabel: String = "Application Log Path Mapping"
+
+  def getRawView(app: AppBase, index: Int): Seq[AppLogPathProfileResults] = {
+    app.appMetaData.map { a =>
+      AppLogPathProfileResults(index, a.appName, a.appId, app.getEventLogPath)
+    }.toSeq
+  }
+
+  override def sortView(rows: Seq[AppLogPathProfileResults]): Seq[AppLogPathProfileResults] = {
+    rows.sortBy(cols => cols.appIndex)
+  }
+}
+
+
+object QualLogPathView extends AppLogPathViewTrait with QualAppIndexMapperTrait {
+  // Keep for the following refactor stages to customize the view based on the app type (Qual/Prof)
+}
+
+object ProfLogPathView extends AppLogPathViewTrait with ProfAppIndexMapperTrait {
+  // Keep for the following refactor stages to customize the view based on the app type (Qual/Prof)
+}
+
+trait AppRapidsJarViewTrait extends ViewableTrait[RapidsJarProfileResult] {
+  override def getLabel: String = "Rapids Accelerator Jar and cuDF Jar"
+
+  def getRawView(app: AppBase, index: Int): Seq[RapidsJarProfileResult] = {
+    if (app.gpuMode) {
+      // Look for rapids-4-spark and cuDF jar in classPathEntries
+      val rapidsJars = app.classpathEntries.filterKeys(_ matches ToolUtils.RAPIDS_JAR_REGEX.regex)
+      if (rapidsJars.nonEmpty) {
+        val cols = rapidsJars.keys.toSeq
+        cols.map(jar => RapidsJarProfileResult(index, jar))
+      } else {
+        // Look for the rapids-4-spark and cuDF jars in Spark Properties
+        ToolUtils.extractRAPIDSJarsFromProps(app.sparkProperties).map {
+          jar => RapidsJarProfileResult(index, jar)
+        }.toSeq
+      }
+    } else {
+      Seq.empty
+    }
+  }
+
+  override def sortView(rows: Seq[RapidsJarProfileResult]): Seq[RapidsJarProfileResult] = {
+    rows.sortBy(cols => (cols.appIndex, cols.jar))
+  }
+}
+
+
+object QualRapidsJarView extends AppRapidsJarViewTrait with QualAppIndexMapperTrait {
+  // Keep for the following refactor stages to customize the view based on the app type (Qual/Prof)
+}
+
+object ProfRapidsJarView extends AppRapidsJarViewTrait with ProfAppIndexMapperTrait {
   // Keep for the following refactor stages to customize the view based on the app type (Qual/Prof)
 }

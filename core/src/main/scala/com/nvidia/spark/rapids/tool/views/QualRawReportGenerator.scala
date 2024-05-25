@@ -72,10 +72,20 @@ object QualRawReportGenerator {
     try {
       pWriter.writeText("### A. Information Collected ###")
       pWriter.write(QualInformationView.getLabel, QualInformationView.getRawView(Seq(app)))
+      pWriter.write(QualLogPathView.getLabel, QualLogPathView.getRawView(Seq(app)))
       pWriter.write(QualDataSourceView.getLabel, QualDataSourceView.getRawView(Seq(app)))
       pWriter.write(QualExecutorView.getLabel, QualExecutorView.getRawView(Seq(app)))
       pWriter.write(QualAppJobView.getLabel, QualAppJobView.getRawView(Seq(app)))
       generateSQLProcessingView(pWriter, app, appIndex)
+      pWriter.write(QualPropertiesView("rapids").getLabel,
+        QualPropertiesView("rapids").getRawView(Seq(app)),
+        Some("Spark Rapids parameters"))
+      pWriter.write(QualPropertiesView("spark").getLabel,
+        QualPropertiesView("spark").getRawView(Seq(app)),
+        Some("Spark Properties"))
+      pWriter.write(QualPropertiesView("system").getLabel,
+        QualPropertiesView("system").getRawView(Seq(app)),
+        Some("System Properties"))
       pWriter.writeText("\n### B. Analysis ###\n")
       constructLabelsMaps(
         QualSparkMetricsAnalyzer.getAggRawMetrics(app, appIndex)).foreach { case (label, metrics) =>
