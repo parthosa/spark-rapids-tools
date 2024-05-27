@@ -29,7 +29,8 @@ case class ApplicationSummaryInfo(
     rapidsProps: Seq[RapidsPropertyProfileResult],
     rapidsJar: Seq[RapidsJarProfileResult],
     sqlMetrics: Seq[SQLAccumProfileResults],
-    jsMetAgg: Seq[JobStageAggTaskMetricsProfileResult],
+    jobAggMetrics: Seq[JobAggTaskMetricsProfileResult],
+    stageAggMetrics: Seq[StageAggTaskMetricsProfileResult],
     sqlTaskAggMetrics: Seq[SQLTaskAggMetricsProfileResult],
     durAndCpuMet: Seq[SQLDurationExecutorTimeProfileResult],
     skewInfo: Seq[ShuffleSkewProfileResult],
@@ -175,10 +176,9 @@ class SingleAppSummaryInfoProvider(val app: ApplicationSummaryInfo)
 
   // Return shuffle stage(Id)s which have positive spilling metrics
   override def getShuffleStagesWithPosSpilling: Set[Long] = {
-    app.jsMetAgg.collect { case row if (row.id.contains("stage") &&
-      row.srTotalBytesReadSum + row.swBytesWrittenSum > 0 &&
-      row.diskBytesSpilledSum + row.memoryBytesSpilledSum > 0) =>
-        row.id.split("_")(1).toLong
+    app.stageAggMetrics.collect { case row
+      if row.srTotalBytesReadSum + row.swBytesWrittenSum > 0 &&
+      row.diskBytesSpilledSum + row.memoryBytesSpilledSum > 0 => row.id
     }.toSet
   }
 
