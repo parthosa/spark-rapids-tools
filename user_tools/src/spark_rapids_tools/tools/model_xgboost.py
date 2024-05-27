@@ -527,21 +527,22 @@ def load_csv_files(
                     sql_ops_metrics['Exec Is Supported']
                 ].drop(columns=['Exec Is Supported'])
             else:  # qualtool_filter_by = 'sqlId'
-                sql_level_supp = (
-                    node_level_supp.groupby(['App ID', 'SQL ID'])['Exec Is Supported']
-                    .agg('all')
-                    .reset_index()
-                )
-                sql_level_supp = sql_level_supp.loc[sql_level_supp['Exec Is Supported']]
-                sql_app_metrics = sql_app_metrics.merge(
-                    sql_level_supp,
-                    left_on=['appID', 'sqlID'],
-                    right_on=['App ID', 'SQL ID'],
-                    how='inner',
-                )
-                sql_app_metrics = sql_app_metrics.drop(
-                    columns=['Exec Is Supported', 'App ID', 'SQL ID']
-                )
+                pass
+                # sql_level_supp = (
+                #     node_level_supp.groupby(['App ID', 'SQL ID'])['Exec Is Supported']
+                #     .agg('all')
+                #     .reset_index()
+                # )
+                # sql_level_supp = sql_level_supp.loc[sql_level_supp['Exec Is Supported']]
+                # sql_app_metrics = sql_app_metrics.merge(
+                #     sql_level_supp,
+                #     left_on=['appID', 'sqlID'],
+                #     right_on=['App ID', 'SQL ID'],
+                #     how='inner',
+                # )
+                # sql_app_metrics = sql_app_metrics.drop(
+                #     columns=['Exec Is Supported', 'App ID', 'SQL ID']
+                # )
     else:
         if node_level_supp is not None:
             stages_supp = pd.DataFrame(columns=['appId', 'sqlID', 'stageIds'])
@@ -550,45 +551,42 @@ def load_csv_files(
     # sqlids to drop due to failures meeting below criteria
     sqls_to_drop = set()
 
-    # Load job+stage level agg metrics:
-    job_stage_agg_tbl = scan_tbl('job_+_stage_level_aggregated_task_metrics')
-    if not any([job_stage_agg_tbl.empty, job_map_tbl.empty]):
-        job_stage_agg_tbl = job_stage_agg_tbl.drop(columns='appIndex')
-        job_stage_agg_tbl = job_stage_agg_tbl.rename(
+    # Load stage level agg metrics:
+    stage_agg_tbl = scan_tbl('stage_level_aggregated_task_metrics')
+    if not stage_agg_tbl.empty:
+        stage_agg_tbl = stage_agg_tbl.drop(columns='appIndex')
+        stage_agg_tbl = stage_agg_tbl.rename(
             columns={'numTasks': 'numTasks_sum', 'duration_avg': 'duration_mean'}
         )
-        job_stage_agg_tbl['appId'] = app_info['appId'].iloc[0]
-        job_stage_agg_tbl['appName'] = app_name
+        stage_agg_tbl['appId'] = app_info['appId'].iloc[0]
+        stage_agg_tbl['appName'] = app_name
 
         # Only need job level aggs for now since one-to-many relationships between stageID and sqlID.
-        job_stage_agg_tbl['js_type'] = job_stage_agg_tbl['ID'].str.split('_').str[0]
+        # job_stage_agg_tbl['js_type'] = job_stage_agg_tbl['ID'].str.split('_').str[0]
         # mark for removal from modeling sqlids that have failed stage time > 10% total stage time
         allowed_failed_duration_fraction = 0.10
-        stage_agg_tbl = job_stage_agg_tbl.loc[
-            job_stage_agg_tbl.js_type == 'stage'
-            ].reset_index()
-        stage_agg_tbl['ID'] = stage_agg_tbl['ID'].str.split('_').str[1].astype(int)
+        stage_agg_tbl = stage_agg_tbl.reset_index()
         failed_stages = scan_tbl('failed_stages', warn_on_error=False)
         if not sql_to_stage.empty and not failed_stages.empty:
-            stage_agg_tbl = stage_agg_tbl[['ID', 'Duration']].merge(
-                sql_to_stage, left_on='ID', right_on='stageId'
+            stage_agg_tbl = stage_agg_tbl[['stageId', 'Duration']].merge(
+                sql_to_stage, on='stageId'
             )
             total_stage_time = (
-                stage_agg_tbl[['sqlID', 'ID', 'Duration']]
+                stage_agg_tbl[['sqlID', 'stageId', 'Duration']]
                 .groupby('sqlID')
                 .agg('sum')
                 .reset_index()
             )
             failed_stage_time = (
-                stage_agg_tbl[['sqlID', 'ID', 'Duration']]
-                .merge(failed_stages, left_on='ID', right_on='stageId', how='inner')
+                stage_agg_tbl[['sqlID', 'stageId', 'Duration']]
+                .merge(failed_stages, on='stageId', how='inner')
                 .groupby('sqlID')
                 .agg('sum')
                 .reset_index()
                 .drop(columns=['sqlID'])
             )
             stage_times = total_stage_time.merge(
-                failed_stage_time, on='ID', how='inner'
+                failed_stage_time, on='stageId', how='inner'
             )
             stage_times.info()
             sqls_to_drop = set(
@@ -602,37 +600,30 @@ def load_csv_files(
             logger.warning('Ignoring sqlIDs %s due to excessive failed/cancelled stage duration.', sqls_to_drop)
 
         if node_level_supp is not None and (qual_tool_filter == 'stage'):
-            job_stage_agg_tbl = job_stage_agg_tbl[
-                job_stage_agg_tbl['js_type'] == 'stage'
-                ]
-            job_stage_agg_tbl['ID'] = (
-                job_stage_agg_tbl['ID']
-                .apply(lambda id: int(id.split('_')[1]))
-                .astype(int)
-            )
-            job_stage_agg_tbl['appId'] = job_stage_agg_tbl['appId'].astype(str)
+            stage_agg_tbl['appId'] = stage_agg_tbl['appId'].astype(str)
             # add per stage 'Exec Is Supported' column and also sqlID (stages_supp has this latter info as well)
-            job_stage_agg_tbl = job_stage_agg_tbl.merge(
+            stage_agg_tbl = stage_agg_tbl.merge(
                 stages_supp,
-                left_on=['appId', 'ID'],
+                left_on=['appId', 'stageId'],
                 right_on=['appId', 'stageIds'],
                 how='inner',
             )
-            job_stage_agg_tbl = job_stage_agg_tbl.drop(columns=['stageIds'])
+            stage_agg_tbl = stage_agg_tbl.drop(columns=['stageIds'])
         else:
-            job_stage_agg_tbl = job_stage_agg_tbl[job_stage_agg_tbl['js_type'] == 'job']
+            pass
+            # job_stage_agg_tbl = job_stage_agg_tbl[job_stage_agg_tbl['js_type'] == 'job']
+            #
+            # # Update job+stage agg table:
+            # job_stage_agg_tbl = job_stage_agg_tbl.merge(
+            #     job_map_tbl[['jobID', 'sqlID', 'jobStartTime_min']],
+            #     left_on='ID',
+            #     right_on='jobID',
+            #     how='left',
+            # )
 
-            # Update job+stage agg table:
-            job_stage_agg_tbl = job_stage_agg_tbl.merge(
-                job_map_tbl[['jobID', 'sqlID', 'jobStartTime_min']],
-                left_on='ID',
-                right_on='jobID',
-                how='left',
-            )
-
-        job_stage_agg_tbl['sqlID'] = job_stage_agg_tbl['sqlID'].astype(int)
-        job_stage_agg_tbl['hasSqlID'] = job_stage_agg_tbl['sqlID'] != -1
-        job_stage_agg_tbl = job_stage_agg_tbl.drop(columns=['ID', 'js_type'])
+        stage_agg_tbl['sqlID'] = stage_agg_tbl['sqlID'].astype(int)
+        stage_agg_tbl['hasSqlID'] = stage_agg_tbl['sqlID'] != -1
+        stage_agg_tbl = stage_agg_tbl.drop(columns=['stageId'])
 
     # Load wholestage operator info:
 
@@ -696,7 +687,7 @@ def load_csv_files(
         'ops_tbl': sql_ops_metrics,
         'spark_props_tbl': spark_props,
         'job_map_tbl': job_map_tbl,
-        'job_stage_agg_tbl': job_stage_agg_tbl,
+        'stage_agg_tbl': stage_agg_tbl,
         'wholestage_tbl': wholestage_tbl,
         'ds_tbl': ds_tbl,
     }
@@ -727,9 +718,9 @@ def extract_raw_features(
     app_tbl = combine_tables('app_tbl').sort_values('startTime', ascending=True)
     ops_tbl = combine_tables('ops_tbl')
     # job_map_tbl = combine_tables('job_map_tbl')
-    job_stage_agg_tbl = combine_tables('job_stage_agg_tbl')
+    stage_agg_tbl = combine_tables('stage_agg_tbl')
     wholestage_tbl = combine_tables('wholestage_tbl')
-    if any([app_tbl.empty, ops_tbl.empty, job_stage_agg_tbl.empty]):
+    if any([app_tbl.empty, ops_tbl.empty, stage_agg_tbl.empty]):
         logger.warning('Empty features tables')
         return pd.DataFrame()
 
@@ -787,25 +778,26 @@ def extract_raw_features(
     )
 
     # identify reduce ops using suffix of column names
-    job_stage_reduce_cols = {
+    stage_reduce_cols = {
         cc: cc.split('_')[-1]
-        for cc in job_stage_agg_tbl.columns
+        for cc in stage_agg_tbl.columns
         if cc.split('_')[-1] in ['sum', 'min', 'max', 'mean']
     }
 
     if node_level_supp is not None and (qualtool_filter == 'stage'):
         # if supported exec info supplied aggregate features only over supported stages
-        sql_job_agg_tbl = job_stage_agg_tbl.loc[job_stage_agg_tbl['Exec Is Supported']]
+        sql_job_agg_tbl = stage_agg_tbl.loc[stage_agg_tbl['Exec Is Supported']]
         if sql_job_agg_tbl.empty:
             logger.warning('No fully supported stages.')
             return pd.DataFrame()
     else:
-        sql_job_agg_tbl = job_stage_agg_tbl
+        pass
+        # sql_job_agg_tbl = job_stage_agg_tbl
 
     # aggregate using reduce ops, recomputing duration_mean
-    sql_job_agg_tbl = job_stage_agg_tbl.groupby(
+    sql_job_agg_tbl = stage_agg_tbl.groupby(
         ['appId', 'appName', 'sqlID'], as_index=False
-    ).agg(job_stage_reduce_cols)
+    ).agg(stage_reduce_cols)
     sql_job_agg_tbl['duration_mean'] = (
             sql_job_agg_tbl['duration_sum'] / sql_job_agg_tbl['numTasks_sum']
     )
@@ -890,7 +882,7 @@ def extract_raw_features(
         # if supported info supplied and filtering by supported stage
         # add a column with fraction of total task time supported for each sql ID
         time_ratio = (
-            job_stage_agg_tbl[['appId', 'sqlID', 'Exec Is Supported', 'duration_sum']]
+            stage_agg_tbl[['appId', 'sqlID', 'Exec Is Supported', 'duration_sum']]
             .set_index(['appId', 'sqlID', 'Exec Is Supported'])
             .groupby(['appId', 'sqlID', 'Exec Is Supported'])
             .agg('sum')
