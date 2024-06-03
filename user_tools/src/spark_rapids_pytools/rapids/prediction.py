@@ -18,7 +18,8 @@ import os
 
 from dataclasses import dataclass
 
-from spark_rapids_tools.tools.model_xgboost import predict, _print_summary, _print_speedup_summary
+from spark_rapids_tools.tools.qualx.qualx_main import predict
+from spark_rapids_tools.tools.qualx.util import print_summary, print_speedup_summary
 from spark_rapids_pytools.cloud_api.sp_types import get_platform
 from spark_rapids_pytools.common.sys_storage import FSUtil
 from spark_rapids_pytools.common.utilities import Utils
@@ -78,9 +79,10 @@ class Prediction(RapidsTool):
 
     def _run_rapids_tool(self):
         output_info = self.prepare_prediction_output_info()
-        df = predict(self.platform_type.map_to_java_arg(), self.qual_output, self.prof_output, output_info)
-        _print_summary(df)
-        _print_speedup_summary(df)
+        df = predict(platform=self.platform_type.map_to_java_arg(), qual=self.qual_output,
+                     profile=self.prof_output, output_info=output_info)
+        print_summary(df)
+        print_speedup_summary(df)
         df.to_csv(f'{self.output_folder}/prediction.csv', float_format='%.2f')
 
     def _collect_result(self):
