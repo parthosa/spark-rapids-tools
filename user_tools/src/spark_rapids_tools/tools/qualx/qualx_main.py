@@ -439,8 +439,8 @@ def predict(
     default_preds_df['dataset_name'] = None
 
     # if qualification metrics are provided, load metrics and apply filtering
+    processed_dfs = {}
     if len(qual_metrics) > 0:
-        processed_dfs = {}
         for metrics_dir in qual_metrics:
             datasets = {}
             # add metrics directory to datasets
@@ -490,8 +490,8 @@ def predict(
         }
 
     if not processed_dfs:
-        # this is an error condition and we should not fall back to the default predictions.
-        raise ValueError('No data with metrics found.')
+        logger.error('No preprocessed data found for prediction. Unable to predict speedups.')
+        return pd.DataFrame()
 
     # predict on each input dataset
     dataset_summaries = []
