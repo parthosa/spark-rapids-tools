@@ -16,8 +16,11 @@
 
 from .dev_cli import DevCLI
 from .tools_cli import ToolsCLI
+from spark_rapids_tools.utils.user_env_validator import UserEnvValidator
 
 __all__ = [
     'ToolsCLI',
     'DevCLI'
 ]
+
+UserEnvValidator.validate()

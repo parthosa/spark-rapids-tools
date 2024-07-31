@@ -18,3 +18,5 @@ from spark_rapids_pytools.build import get_version
 
 VERSION = '24.06.2'
 __version__ = get_version(VERSION)
+requires_python = '>=3.8,<3.10'
+requires_os = ['linux', 'darwin']

@@ -1,4 +1,4 @@
-# Copyright (c) 2023, NVIDIA CORPORATION.
+# Copyright (c) 2023-2024, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -70,3 +70,17 @@ class InvalidPropertiesSchema(CspPathException, ValueError):
                 content.append(str.join('. ', single_err))
             self.message = str.join('\n', content)
         super().__init__(self.message)
+
+
+class UnsupportedPythonVersionException(Exception):
+    """Exception raised for unsupported runtime versions."""
+    def __init__(self, current_version: str, requires_python: str) -> None:
+        message = f'Python version \'{current_version}\' is not supported. Supported version: {requires_python}'
+        super().__init__(message)
+
+
+class UnsupportedOSException(Exception):
+    """Exception raised for unsupported operating systems."""
+    def __init__(self, current_os: str, supported_os: list) -> None:
+        message = f'Operating system \'{current_os}\' is not supported. Supported OS: {supported_os}'
+        super().__init__(message)
