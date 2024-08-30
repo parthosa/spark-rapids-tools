@@ -16,6 +16,7 @@
 name: Python unit test
 
 on:
+  workflow_dispatch: # Allow manual triggering
   pull_request:
     types: [opened, synchronize, reopened]
 
