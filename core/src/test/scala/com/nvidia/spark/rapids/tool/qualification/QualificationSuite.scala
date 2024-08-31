@@ -533,11 +533,13 @@ class QualificationSuite extends BaseTestSuite {
       val allArgs = Array(
         "--output-directory",
         outpath.getAbsolutePath())
-
-      val appArgs = new QualificationArgs(allArgs ++ logFiles)
-      val (exit, appSum) = QualificationMain.mainInternal(appArgs)
-      assert(exit == 0)
-      assert(appSum.size == pwList.length + 1)
+      // test qualification one file at a time to avoid merging results as a single app
+      for (logFile <- logFiles) {
+        val appArgs = new QualificationArgs(allArgs ++ Array(logFile))
+        val (exit, appSum) = QualificationMain.mainInternal(appArgs)
+        assert(exit == 0)
+        assert(appSum.size == 1)
+      }
       // test Profiler
       val apps = ToolTestUtils.processProfileApps(logFiles, sparkSession)
       assert(apps.size == pwList.length + 1)
@@ -1755,6 +1757,7 @@ class QualificationSuite extends BaseTestSuite {
     TrampolineUtil.withTempDir { outPath =>
       val baseArgs = Array("--output-directory",
         outPath.getAbsolutePath,
+        "-n", "12",
         s"$logDir/multiple_attempts/*")
       val appArgs = new QualificationArgs(baseArgs)
       val (exitCode, result) = QualificationMain.mainInternal(appArgs)
