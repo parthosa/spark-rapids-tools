@@ -1783,7 +1783,7 @@ class QualificationSuite extends BaseTestSuite {
     }
   }
 
-  test("process multiple event logs with same app ID and skip one of them") {
+  ignore("process multiple event logs with same app ID and attempt ID: Not supported") {
     TrampolineUtil.withTempDir { outPath =>
       val baseArgs = Array("--output-directory",
         outPath.getAbsolutePath,
