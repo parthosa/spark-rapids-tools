@@ -1782,6 +1782,27 @@ class QualificationSuite extends BaseTestSuite {
       ToolTestUtils.compareStatusReport(sparkSession, expectedStatusCount, statusResultFile)
     }
   }
+
+  ignore("process multiple event logs with same app ID and attempt ID: Not supported") {
+    TrampolineUtil.withTempDir { outPath =>
+      val baseArgs = Array("--output-directory",
+        outPath.getAbsolutePath,
+        s"$logDir/eventlog_same_app_id_1.zstd",
+        s"$logDir/eventlog_same_app_id_2.zstd")
+      val appArgs = new QualificationArgs(baseArgs)
+      val (exitCode, result) = QualificationMain.mainInternal(appArgs)
+      assert(exitCode == 0 && result.size == 1,
+        "Qualification tool returned unexpected results.")
+
+      val statusResultFile = s"$outPath/${QualOutputWriter.LOGFILE_NAME}/" +
+        s"${QualOutputWriter.LOGFILE_NAME}_status.csv"
+
+      // Only one of the event logs should be processed and the other should be skipped.
+      // Status counts: 1 SUCCESS, 0 FAILURE, 1 SKIPPED, 0 UNKNOWN
+      val expectedStatusCount = StatusReportCounts(1, 0, 1, 0)
+      ToolTestUtils.compareStatusReport(sparkSession, expectedStatusCount, statusResultFile)
+    }
+  }
 }
 
 class ToolTestListener extends SparkListener {
