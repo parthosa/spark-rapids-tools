@@ -185,7 +185,7 @@ class Qualification(outputPath: String, numRows: Int, hadoopConf: Configuration,
             AppSubscriber.withSafeValidAttempt(app.appId, app.attemptId) { () =>
               val newQualSummary = tempSummary.copy(clusterSummary = newClusterSummary)
               // check if the app is already in the map
-              if (allApps.contains(app.appId)) {
+              if (allApps.containsKey(app.appId)) {
                 // fix the progress bar counts
                 progressBar.foreach(_.adjustCounterForMultipleAttempts())
                 logInfo(s"Removing older app summary for app: ${app.appId} " +
