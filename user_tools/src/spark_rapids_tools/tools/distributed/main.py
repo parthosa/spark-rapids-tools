@@ -1,0 +1,152 @@
+import os
+import shutil
+import subprocess
+import traceback
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import List, Optional
+
+from pyspark import SparkFiles, SparkContext
+
+from spark_rapids_pytools.rapids.tools_submission_cmd import ToolSubmissionCommand
+from spark_rapids_tools.tools.distributed.hdfs_manager import HdfsManager, InputFsManager
+from spark_rapids_tools.tools.distributed.spark_job_manager import SparkJobManager
+from spark_rapids_tools.tools.distributed.result_combiner import ResultCombiner
+from spark_rapids_tools.tools.distributed.utils import Utilities
+
+SPARK_HOME = os.environ.get("SPARK_HOME")
+HADOOP_HOME = os.environ.get("HADOOP_HOME")
+
+
+@dataclass
+class DistributedJarExecutor:
+    spark_master: str = field(init=True)
+    submission_cmd: ToolSubmissionCommand = field(init=True)
+    hdfs_manager: HdfsManager = field(init=False)
+    spark_manager: SparkJobManager = field(init=False)
+    input_fs_manager: InputFsManager = field(init=False)
+
+    def __post_init__(self):
+        self.rapids_args = self.submission_cmd.extra_rapids_args[:-1]
+        self.event_logs_path = self.submission_cmd.extra_rapids_args[-1]
+
+    def run_tool_as_spark_app(self):
+        output_folder_name = os.path.basename(self.submission_cmd.output_folder)
+        self._init_setup()
+
+        self.hdfs_manager = HdfsManager(output_folder_name=output_folder_name)
+        self.hdfs_manager.init_setup()
+
+        self.input_fs_manager = InputFsManager()
+        eventlog_files = self.input_fs_manager.get_files_from_path(self.event_logs_path)
+
+        self.spark_manager = SparkJobManager(self.spark_master,
+                                             self.submission_cmd.dependencies_paths,
+                                             self.submission_cmd.jvm_log_file,
+                                             self.submission_cmd.output_folder)
+        run_jar_command = self._create_run_jar_map_func(output_folder_name)
+
+        self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
+
+        executor_output_dir = os.path.join(self.submission_cmd.output_folder, Utilities.get_executor_output_dir_name())
+        self.hdfs_manager.copy_output_hdfs_to_local(executor_output_dir=executor_output_dir)
+
+        result_combiner = ResultCombiner(output_folder=self.submission_cmd.output_folder)
+        result_combiner.combine_results()
+
+        self._cleanup()
+
+    @staticmethod
+    def _init_setup():
+        java_home = os.environ.get("JAVA_HOME")
+        if not java_home:
+            raise ValueError("JAVA_HOME is not set")
+        print(f"JAVA_HOME is set to {java_home}")
+
+    def _create_run_jar_map_func(self, output_folder_name: str):
+        def run_jar_map_func(file_path: str):
+            logs = [f"Processing {file_path}"]
+
+            # Generate unique executor output directory
+            executor_output_dir = os.path.join(
+                Utilities.get_cache_dir(), output_folder_name, Utilities.get_executor_output_dir_name(),
+                os.path.basename(file_path)
+            )
+            os.makedirs(executor_output_dir, exist_ok=True)
+
+            # Run the JAR command
+            jar_command = self._get_jar_command(file_path, executor_output_dir)
+            logs.extend(self._submit_jar_cmd(jar_command))
+            # Copy output to HDFS
+            logs.extend(self._copy_output_dir_to_hdfs(executor_output_dir))
+            return logs, executor_output_dir
+        return run_jar_map_func
+
+    def _get_jar_command(self, file_path: str, executor_output_dir: str) -> List[str]:
+        local_deps_path = [SparkFiles.get(os.path.basename(dep)) for dep in self.submission_cmd.dependencies_paths]
+        local_deps_path.append(f'{SPARK_HOME}/jars/*')
+        jars = ":".join(local_deps_path)
+
+        java_exec = f"{os.environ['JAVA_HOME']}/bin/java"
+        local_jvm_log_file = SparkFiles.get(os.path.basename(self.submission_cmd.jvm_log_file))
+
+        # Update JVM log configuration
+        jvm_log_file_index = next(i for i, arg in enumerate(self.submission_cmd.jvm_args) if "-Dlog4j.configuration" in arg)
+        self.submission_cmd.jvm_args[jvm_log_file_index] = f"-Dlog4j.configuration=file:{local_jvm_log_file}"
+
+        tool_args = ["--output-directory", executor_output_dir, file_path]
+
+        return [java_exec] + self.submission_cmd.jvm_args + ["-cp", jars, self.submission_cmd.jar_main_class] + self.rapids_args + tool_args
+
+    @staticmethod
+    def _copy_output_dir_to_hdfs(executor_output_dir: str) -> list:
+        logs = []
+        start_time = datetime.now()
+
+        if not os.path.exists(executor_output_dir):
+            logs.append(f"Output directory {executor_output_dir} does not exist")
+            return logs
+
+        copy_command = [f"{HADOOP_HOME}/bin/hadoop", "fs", "-copyFromLocal", executor_output_dir, executor_output_dir]
+        try:
+            subprocess.run(copy_command, check=True, text=True)
+            logs.append(f"Successfully copied {executor_output_dir} to HDFS.")
+        except subprocess.CalledProcessError as ex:
+            logs.append(f"Failed to copy {executor_output_dir} to HDFS. Error: {ex}")
+            logs.append(f"Error details: {traceback.format_exc()}")
+        finally:
+            processing_time = datetime.now() - start_time
+            logs.append(f"Copying Time: {processing_time}")
+
+        return logs
+
+    @staticmethod
+    def _submit_jar_cmd(jar_command: List[str]) -> list:
+        logs = []
+        start_time = datetime.now()
+        command_str = ' '.join(jar_command)
+
+        logs.append(f"Starting execution of command: {command_str}")
+        try:
+            result = subprocess.run(jar_command, check=True, capture_output=True, text=True)
+            logs.append(f"Command succeeded with stdout:\n{result.stdout}")
+            if result.stderr:
+                logs.append(f"Command stderr:\n{result.stderr}")
+        except subprocess.CalledProcessError as ex:
+            logs.append(f"Command failed with exit code {ex.returncode}.")
+            if ex.stdout:
+                logs.append(f"Command stdout:\n{ex.stdout}")
+            if ex.stderr:
+                logs.append(f"Command stderr:\n{ex.stderr}")
+        finally:
+            processing_time = datetime.now() - start_time
+            logs.append(f"Total processing time: {processing_time}")
+
+        return logs
+
+    def _cleanup(self):
+        executor_output_dir = os.path.join(self.submission_cmd.output_folder, Utilities.get_executor_output_dir_name())
+        print(f"Cleaning up {executor_output_dir}")
+        shutil.rmtree(executor_output_dir, ignore_errors=True)
+        if self.spark_manager:
+            self.spark_manager.cleanup()

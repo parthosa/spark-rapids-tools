@@ -22,7 +22,9 @@ from typing import List, Optional
 from spark_rapids_pytools.common.prop_manager import JSONPropertiesContainer
 from spark_rapids_pytools.common.utilities import ToolLogging, Utils
 from spark_rapids_pytools.rapids.tool_ctxt import ToolContext
+from spark_rapids_pytools.rapids.tools_submission_cmd import ToolSubmissionCommand
 from spark_rapids_tools.storagelib import LocalPath
+from spark_rapids_tools.tools.distributed.main import DistributedJarExecutor
 
 
 @dataclass
@@ -82,18 +84,16 @@ class RapidsJob:
         rapids_args.extend(['--output-directory', self.output_path])
         return rapids_args
 
-    def _build_rapids_args(self):
-        rapids_arguments = self._get_persistent_rapids_args()
-        extra_rapids_args = self.prop_container.get_rapids_args()
-        if extra_rapids_args is None:
-            return rapids_arguments
-        rapids_arguments.extend(extra_rapids_args)
-        return rapids_arguments
-
     def _build_submission_cmd(self) -> list:
         raise NotImplementedError
 
+    def _build_submission_cmd_distributed(self) -> ToolSubmissionCommand:
+        raise NotImplementedError
+
     def _submit_job(self, cmd_args: list) -> str:
+        raise NotImplementedError
+
+    def _submit_job_distributed(self, submission_cmd: ToolSubmissionCommand) -> str:
         raise NotImplementedError
 
     def _print_job_output(self, job_output: str):
@@ -113,11 +113,27 @@ class RapidsJob:
             self.logger.error('Error removing temporary log4j properties file: %s', e)
 
     def run_job(self):
+        self.run_job_distributed()
+
+    def run_job_local(self):
         self.logger.info('Prepare job submission command')
         cmd_args = self._build_submission_cmd()
         self.logger.info('Running the Rapids Job...')
         try:
             job_output = self._submit_job(cmd_args)
+            if not ToolLogging.is_debug_mode_enabled():
+                # we check the debug level because we do not want the output displayed twice.
+                self._print_job_output(job_output)
+        finally:
+            self._cleanup_temp_log4j_files()
+        return job_output
+
+    def run_job_distributed(self):
+        self.logger.info('Prepare job submission command')
+        submission_cmd = self._build_submission_cmd_distributed()
+        self.logger.info('Running the Rapids Job...')
+        try:
+            job_output = self._submit_job_distributed(submission_cmd)
             if not ToolLogging.is_debug_mode_enabled():
                 # we check the debug level because we do not want the output displayed twice.
                 self._print_job_output(job_output)
@@ -206,15 +222,37 @@ class RapidsLocalJob(RapidsJob):
         # env vars are added later as a separate dictionary
         classpath_arr = self._build_classpath()
         jvm_args_arr = self._build_jvm_args()
-        cmd_arg = ['java']
-        cmd_arg.extend(jvm_args_arr)
-        cmd_arg.extend(classpath_arr)
-        cmd_arg.append(self.prop_container.get_jar_main_class())
-        cmd_arg.extend(self._build_rapids_args())
-        return cmd_arg
+        jar_main_class = self.prop_container.get_jar_main_class()
+        rapids_arguments = self._get_persistent_rapids_args()
+        extra_rapids_args = self.prop_container.get_rapids_args()
+        output_folder = self.exec_ctxt.get_output_folder()
+        work_dir = self.exec_ctxt.get_local_work_dir()
+        submission_cmd = ToolSubmissionCommand(jvm_args_arr, classpath_arr, jar_main_class,
+                                               rapids_arguments, extra_rapids_args, output_folder,
+                                               work_dir)
+        return submission_cmd.build_cmd_local()
+
+    def _build_submission_cmd_distributed(self) -> ToolSubmissionCommand:
+        # env vars are added later as a separate dictionary
+        classpath_arr = self._build_classpath()
+        jvm_args_arr = self._build_jvm_args()
+        jar_main_class = self.prop_container.get_jar_main_class()
+        rapids_arguments = self._get_persistent_rapids_args()
+        extra_rapids_args = self.prop_container.get_rapids_args()
+        output_folder = self.exec_ctxt.get_output_folder()
+        work_dir = self.exec_ctxt.get_local_work_dir()
+        submission_cmd = ToolSubmissionCommand(jvm_args_arr, classpath_arr, jar_main_class,
+                                               rapids_arguments, extra_rapids_args, output_folder,
+                                               work_dir)
+        return submission_cmd
 
     def _submit_job(self, cmd_args: list) -> str:
         env_args = self.prop_container.get_value_silent('platformArgs', 'envArgs')
         out_std = self.exec_ctxt.platform.cli.run_sys_cmd(cmd=cmd_args,
                                                           env_vars=env_args)
         return out_std
+
+    def _submit_job_distributed(self, submission_cmd: ToolSubmissionCommand) -> None:
+        spark_master = "local[*]"
+        executor = DistributedJarExecutor(spark_master, submission_cmd)
+        executor.run_tool_as_spark_app()
