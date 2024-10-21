@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 import pyarrow.fs as fs
 from spark_rapids_tools.tools.distributed.utils import Utilities
 
+
 @dataclass
 class HdfsManager:
     output_folder_name: str
@@ -28,11 +29,7 @@ class HdfsManager:
     def __post_init__(self):
         if not self.hadoop_home:
             raise ValueError("HADOOP_HOME environment variable is not set")
-        self.hdfs_base_dir = self.get_hdfs_nn_addr() + os.path.join(
-            Utilities.get_cache_dir(),
-            self.output_folder_name,
-            Utilities.get_executor_output_dir_name()
-        )
+        self.hdfs_base_dir = self.get_hdfs_nn_addr() + Utilities.get_executor_output_dir(self.output_folder_name)
 
     def init_setup(self):
         """Initial setup to remove any existing directory and create a new one in HDFS."""
@@ -55,13 +52,6 @@ class HdfsManager:
             ["getconf", "-confKey", "fs.defaultFS"],
             "Getting HDFS NameNode address"
         ).stdout.strip()
-
-    def copy_output_hdfs_to_local(self, executor_output_dir: str):
-        """Copy the output from HDFS to a local directory."""
-        self._run_hdfs_command(
-            ["dfs", "-copyToLocal", self.hdfs_base_dir, executor_output_dir],
-            f"Copying HDFS output {self.hdfs_base_dir} to directory {executor_output_dir}"
-        )
 
     @staticmethod
     def _run_hdfs_command(hdfs_args: list, description: str):

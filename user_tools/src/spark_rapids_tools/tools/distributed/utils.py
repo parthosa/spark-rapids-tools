@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import subprocess
 from typing import Optional
 
@@ -19,7 +20,7 @@ from pyspark import SparkContext
 
 
 class Utilities:
-    _DISTRIBUTED_TOOLS_CACHE_DIR = "/var/tmp/spark_rapids_user_tools_distributed_cache"
+    _DISTRIBUTED_TOOLS_CACHE_DIR = "/tmp/spark_rapids_user_tools_distributed_cache"
     _EXECUTOR_OUTPUT_DIR_NAME = "executor_output"
     _SPARK_CONTEXT: Optional[SparkContext] = None
 
@@ -54,9 +55,15 @@ class Utilities:
             raise e
 
     @classmethod
-    def get_cache_dir(cls) -> str:
+    def _get_cache_dir(cls) -> str:
         return cls._DISTRIBUTED_TOOLS_CACHE_DIR
 
     @classmethod
-    def get_executor_output_dir_name(cls) -> str:
+    def _get_executor_output_dir_name(cls) -> str:
         return cls._EXECUTOR_OUTPUT_DIR_NAME
+
+    @classmethod
+    def get_executor_output_dir(cls, output_folder_name: str) -> str:
+        return os.path.join(cls._get_cache_dir(),
+                            output_folder_name,
+                            cls._get_executor_output_dir_name())
