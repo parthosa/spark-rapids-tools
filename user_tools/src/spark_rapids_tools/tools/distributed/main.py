@@ -47,10 +47,8 @@ class DistributedJarExecutor:
         run_jar_command = self._create_run_jar_map_func(self.hdfs_manager.hdfs_base_dir)
         self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
 
-        executor_output_dir = os.path.join(self.submission_cmd.output_folder, Utilities.get_executor_output_dir_name())
-        self.hdfs_manager.copy_output_hdfs_to_local(executor_output_dir=executor_output_dir)
-
-        result_combiner = ResultCombiner(output_folder=self.submission_cmd.output_folder)
+        result_combiner = ResultCombiner(output_folder=self.submission_cmd.output_folder,
+                                         executor_output_dir=self.hdfs_manager.hdfs_base_dir)
         result_combiner.combine_results()
 
         self._cleanup()
@@ -117,8 +115,5 @@ class DistributedJarExecutor:
         return logs
 
     def _cleanup(self):
-        executor_output_dir = os.path.join(self.submission_cmd.output_folder, Utilities.get_executor_output_dir_name())
-        print(f"Cleaning up {executor_output_dir}")
-        shutil.rmtree(executor_output_dir, ignore_errors=True)
         if self.spark_manager:
             self.spark_manager.cleanup()
