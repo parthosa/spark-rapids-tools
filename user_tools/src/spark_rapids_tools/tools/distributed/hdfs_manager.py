@@ -28,8 +28,7 @@ class HdfsManager:
     def __post_init__(self):
         if not self.hadoop_home:
             raise ValueError("HADOOP_HOME environment variable is not set")
-        self.hdfs_base_dir = os.path.join(
-            self.get_hdfs_nn_addr(),
+        self.hdfs_base_dir = self.get_hdfs_nn_addr() + os.path.join(
             Utilities.get_cache_dir(),
             self.output_folder_name,
             Utilities.get_executor_output_dir_name()
@@ -50,7 +49,7 @@ class HdfsManager:
         )
 
     @classmethod
-    def get_hdfs_nn_addr(cls):
+    def get_hdfs_nn_addr(cls) -> str:
         """Get the HDFS NameNode address."""
         return cls._run_hdfs_command(
             ["getconf", "-confKey", "fs.defaultFS"],

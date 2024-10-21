@@ -44,8 +44,7 @@ class DistributedJarExecutor:
                                              self.submission_cmd.dependencies_paths,
                                              self.submission_cmd.jvm_log_file,
                                              self.submission_cmd.output_folder)
-        run_jar_command = self._create_run_jar_map_func(output_folder_name)
-
+        run_jar_command = self._create_run_jar_map_func(self.hdfs_manager.hdfs_base_dir)
         self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
 
         executor_output_dir = os.path.join(self.submission_cmd.output_folder, Utilities.get_executor_output_dir_name())
@@ -63,22 +62,17 @@ class DistributedJarExecutor:
             raise ValueError("JAVA_HOME is not set")
         print(f"JAVA_HOME is set to {java_home}")
 
-    def _create_run_jar_map_func(self, output_folder_name: str):
+    def _create_run_jar_map_func(self, hdfs_base_dir: str):
         def run_jar_map_func(file_path: str):
             logs = [f"Processing {file_path}"]
 
             # Generate unique executor output directory
-            executor_output_dir = os.path.join(
-                Utilities.get_cache_dir(), output_folder_name, Utilities.get_executor_output_dir_name(),
-                os.path.basename(file_path)
-            )
-            os.makedirs(executor_output_dir, exist_ok=True)
+            executor_output_dir = os.path.join(hdfs_base_dir, os.path.basename(file_path))
+            logs.append(f"Executor output directory: {executor_output_dir}")
 
             # Run the JAR command
             jar_command = self._get_jar_command(file_path, executor_output_dir)
             logs.extend(self._submit_jar_cmd(jar_command))
-            # Copy output to HDFS
-            logs.extend(self._copy_output_dir_to_hdfs(executor_output_dir))
             return logs, executor_output_dir
         return run_jar_map_func
 
@@ -97,28 +91,6 @@ class DistributedJarExecutor:
         tool_args = ["--output-directory", executor_output_dir, file_path]
 
         return [java_exec] + self.submission_cmd.jvm_args + ["-cp", jars, self.submission_cmd.jar_main_class] + self.rapids_args + tool_args
-
-    @staticmethod
-    def _copy_output_dir_to_hdfs(executor_output_dir: str) -> list:
-        logs = []
-        start_time = datetime.now()
-
-        if not os.path.exists(executor_output_dir):
-            logs.append(f"Output directory {executor_output_dir} does not exist")
-            return logs
-
-        copy_command = [f"{HADOOP_HOME}/bin/hadoop", "fs", "-copyFromLocal", executor_output_dir, executor_output_dir]
-        try:
-            subprocess.run(copy_command, check=True, text=True)
-            logs.append(f"Successfully copied {executor_output_dir} to HDFS.")
-        except subprocess.CalledProcessError as ex:
-            logs.append(f"Failed to copy {executor_output_dir} to HDFS. Error: {ex}")
-            logs.append(f"Error details: {traceback.format_exc()}")
-        finally:
-            processing_time = datetime.now() - start_time
-            logs.append(f"Copying Time: {processing_time}")
-
-        return logs
 
     @staticmethod
     def _submit_jar_cmd(jar_command: List[str]) -> list:
