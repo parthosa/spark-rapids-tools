@@ -55,15 +55,7 @@ class Utilities:
             raise e
 
     @classmethod
-    def _get_cache_dir(cls) -> str:
-        return cls._DISTRIBUTED_TOOLS_CACHE_DIR
-
-    @classmethod
-    def _get_executor_output_dir_name(cls) -> str:
-        return cls._EXECUTOR_OUTPUT_DIR_NAME
-
-    @classmethod
-    def get_executor_output_dir(cls, output_folder_name: str) -> str:
-        return os.path.join(cls._get_cache_dir(),
+    def get_executor_output_path(cls, output_folder_name: str) -> str:
+        return os.path.join(cls._DISTRIBUTED_TOOLS_CACHE_DIR,
                             output_folder_name,
-                            cls._get_executor_output_dir_name())
+                            cls._EXECUTOR_OUTPUT_DIR_NAME)
