@@ -25,27 +25,21 @@ from spark_rapids_tools.tools.distributed.utils import Utilities
 @dataclass
 class HdfsManager:
     output_folder_name: str
-    hdfs_base_dir: str = field(init=False)
-    hadoop_home: str = field(init=False, default=os.getenv("HADOOP_HOME"))
+    executor_output_path: str = field(init=False)
 
     def __post_init__(self):
-        if not self.hadoop_home:
-            raise ValueError("HADOOP_HOME environment variable is not set")
-        self.hdfs_base_dir = self.get_hdfs_nn_addr() + Utilities.get_executor_output_dir(self.output_folder_name)
+        assert os.getenv("HADOOP_HOME") is not None, "HADOOP_HOME environment variable is not set"
+        self.executor_output_path = "hdfs://" + Utilities.get_executor_output_path(self.output_folder_name)
 
     def init_setup(self):
-        """Initial setup to remove any existing directory and create a new one in HDFS."""
+        """Initial setup to create the HDFS base directory."""
         try:
             self._run_hdfs_command(
-                ["dfs", "-rm", "-r", self.hdfs_base_dir],
-                f"Removing HDFS directory {self.hdfs_base_dir}"
+                ["dfs", "-mkdir", "-p", self.executor_output_path],
+                f"Creating HDFS directory {self.executor_output_path}"
             )
-        except Exception:  # pylint: disable=broad-except
-            pass
-        self._run_hdfs_command(
-            ["dfs", "-mkdir", "-p", self.hdfs_base_dir],
-            f"Creating HDFS directory {self.hdfs_base_dir}"
-        )
+        except Exception as e:
+            raise RuntimeError("Unable to create HDFS directory") from e
 
     @classmethod
     def get_hdfs_nn_addr(cls) -> str:
@@ -56,13 +50,9 @@ class HdfsManager:
         ).stdout.strip()
 
     @staticmethod
-    def _run_hdfs_command(hdfs_args: list, description: str):
+    def _run_hdfs_command(cmd_args: list, description: str):
         """Run an HDFS command and log its description."""
-        hadoop_home = os.getenv("HADOOP_HOME")
-        if not hadoop_home:
-            raise ValueError("HADOOP_HOME environment variable is not set")
-
-        command = [f"{hadoop_home}/bin/hdfs"] + hdfs_args
+        command = [f"{os.getenv('HADOOP_HOME')}/bin/hdfs"] + cmd_args
         try:
             return Utilities.run_cmd(command, description)
         except Exception as e:

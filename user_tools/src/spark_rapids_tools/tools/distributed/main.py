@@ -27,6 +27,7 @@ from spark_rapids_tools.tools.distributed.spark_job_manager import SparkJobManag
 
 SPARK_HOME = os.environ.get("SPARK_HOME")
 HADOOP_HOME = os.environ.get("HADOOP_HOME")
+JAVA_HOME = os.environ.get("JAVA_HOME")
 
 
 @dataclass
@@ -38,12 +39,14 @@ class DistributedJarExecutor:
     input_fs_manager: InputFsManager = field(init=False)
 
     def __post_init__(self):
+        assert SPARK_HOME, "SPARK_HOME environment variable is not set."
+        assert HADOOP_HOME, "HADOOP_HOME environment variable is not set."
+        assert JAVA_HOME, "JAVA_HOME environment variable is not set."
         self.rapids_args = self.submission_cmd.extra_rapids_args[:-1]
         self.event_logs_path = self.submission_cmd.extra_rapids_args[-1]
 
     def run_tool_as_spark_app(self):
         output_folder_name = os.path.basename(self.submission_cmd.output_folder)
-        self._init_setup()
 
         self.hdfs_manager = HdfsManager(output_folder_name=output_folder_name)
         self.hdfs_manager.init_setup()
@@ -55,21 +58,14 @@ class DistributedJarExecutor:
                                              self.submission_cmd.dependencies_paths,
                                              self.submission_cmd.jvm_log_file,
                                              self.submission_cmd.output_folder)
-        run_jar_command = self._create_run_jar_map_func(self.hdfs_manager.hdfs_base_dir)
+        run_jar_command = self._create_run_jar_map_func(self.hdfs_manager.executor_output_path)
         self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
 
         result_combiner = ResultCombiner(output_folder=self.submission_cmd.output_folder,
-                                         executor_output_dir=self.hdfs_manager.hdfs_base_dir)
+                                         executor_output_dir=self.hdfs_manager.executor_output_path)
         result_combiner.combine_results()
 
         self._cleanup()
-
-    @staticmethod
-    def _init_setup():
-        java_home = os.environ.get("JAVA_HOME")
-        if not java_home:
-            raise ValueError("JAVA_HOME is not set")
-        print(f"JAVA_HOME is set to {java_home}")
 
     def _create_run_jar_map_func(self, hdfs_base_dir: str):
         def run_jar_map_func(file_path: str):
