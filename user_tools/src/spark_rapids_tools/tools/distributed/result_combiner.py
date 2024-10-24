@@ -14,15 +14,14 @@
 
 import fnmatch
 import json
-import pandas as pd
-from pathlib import Path
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import urlparse
 
+import pandas as pd
 from pyarrow import fs
 from pyarrow.fs import FileInfo
-
-from dataclasses import dataclass, field
 
 
 # Base class for all file processors
