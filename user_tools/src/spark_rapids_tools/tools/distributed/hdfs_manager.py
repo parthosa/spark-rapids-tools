@@ -26,28 +26,19 @@ from spark_rapids_tools.tools.distributed.utils import Utilities
 class HdfsManager:
     output_folder_name: str
     executor_output_path: str = field(init=False)
+    _HDFS_SCHEME: str = "hdfs"
 
     def __post_init__(self):
         assert os.getenv("HADOOP_HOME") is not None, "HADOOP_HOME environment variable is not set"
-        self.executor_output_path = "hdfs://" + Utilities.get_executor_output_path(self.output_folder_name)
-
-    def init_setup(self):
-        """Initial setup to create the HDFS base directory."""
+        # Set the CLASSPATH environment variable. This is required by pyarrow to access HDFS.
         try:
-            self._run_hdfs_command(
-                ["dfs", "-mkdir", "-p", self.executor_output_path],
-                f"Creating HDFS directory {self.executor_output_path}"
-            )
-        except Exception as e:
-            raise RuntimeError("Unable to create HDFS directory") from e
+            result = self._run_hdfs_command(["classpath", "--glob"], "Setting CLASSPATH")
+            os.environ['CLASSPATH'] = result.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Error retrieving Hadoop classpath") from e
 
-    @classmethod
-    def get_hdfs_nn_addr(cls) -> str:
-        """Get the HDFS NameNode address."""
-        return cls._run_hdfs_command(
-            ["getconf", "-confKey", "fs.defaultFS"],
-            "Getting HDFS NameNode address"
-        ).stdout.strip()
+        executor_output_path_raw = Utilities.get_executor_output_path(self.output_folder_name)
+        self.executor_output_path = f"{self._HDFS_SCHEME}:///{executor_output_path_raw.strip('/')}"
 
     @staticmethod
     def _run_hdfs_command(cmd_args: list, description: str):
@@ -64,32 +55,15 @@ class InputFsManager:
     input_fs: fs.FileSystem = field(init=False)
 
     def __post_init__(self):
-        self._init_env()
         self.input_fs = fs.HadoopFileSystem("default")
-
-    @staticmethod
-    def _init_env():
-        """Set up the HADOOP classpath environment variable."""
-        hadoop_home = os.getenv("HADOOP_HOME")
-        if not hadoop_home:
-            raise ValueError("HADOOP_HOME environment variable is not set")
-        try:
-            classpath_output = subprocess.check_output(
-                [f"{hadoop_home}/bin/hadoop", "classpath", "--glob"]
-            ).decode().strip()
-            os.environ['CLASSPATH'] = classpath_output
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Error retrieving Hadoop classpath: {e}")
-
-    @staticmethod
-    def extract_directory(directory: str) -> str:
-        """Extract the path from a HDFS URL if present."""
-        return urlparse(directory).path if directory.startswith("hdfs://") else directory
 
     def get_files_from_path(self, directory: str) -> list:
         """Retrieve the list of files from a given directory in HDFS."""
-        directory_path = self.extract_directory(directory)
-        hdfs_nn_addr = HdfsManager.get_hdfs_nn_addr()
-
-        file_infos = self.input_fs.get_file_info(fs.FileSelector(directory_path, recursive=False))
-        return [f"{hdfs_nn_addr}{file_info.path}" for file_info in file_infos if file_info.type == fs.FileType.File]
+        parsed_url = urlparse(directory)
+        file_infos = self.input_fs.get_file_info(fs.FileSelector(parsed_url.path, recursive=False))
+        uris = []
+        for info in file_infos:
+            if info.type == fs.FileType.File:
+                uri = f"{parsed_url.scheme}://{parsed_url.netloc}/{info.path.strip('/')}"
+                uris.append(uri)
+        return uris

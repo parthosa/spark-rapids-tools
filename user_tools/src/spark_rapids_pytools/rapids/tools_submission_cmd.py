@@ -25,6 +25,7 @@ from typing import List
 class ToolSubmissionCommand:
     jvm_args: List[str]
     classpath_arr: List[str]
+    hadoop_classpath: str
     jar_main_class: str
     rapids_arguments: List[str]
     extra_rapids_args: List[str]
