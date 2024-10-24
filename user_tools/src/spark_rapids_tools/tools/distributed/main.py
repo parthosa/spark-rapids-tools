@@ -49,7 +49,6 @@ class DistributedJarExecutor:
         output_folder_name = os.path.basename(self.submission_cmd.output_folder)
 
         self.hdfs_manager = HdfsManager(output_folder_name=output_folder_name)
-        self.hdfs_manager.init_setup()
 
         self.input_fs_manager = InputFsManager()
         eventlog_files = self.input_fs_manager.get_files_from_path(self.event_logs_path)
@@ -83,6 +82,7 @@ class DistributedJarExecutor:
 
     def _get_jar_command(self, file_path: str, executor_output_dir: str) -> List[str]:
         local_deps_path = [SparkFiles.get(os.path.basename(dep)) for dep in self.submission_cmd.dependencies_paths]
+        local_deps_path.append(self.submission_cmd.hadoop_classpath)
         local_deps_path.append(f'{SPARK_HOME}/jars/*')
         jars = ":".join(local_deps_path)
 
