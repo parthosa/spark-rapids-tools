@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -65,9 +66,44 @@ class SparkJobManager:
             logging.error(f"Error reading Spark configuration file: {e}")
         return spark_conf
 
+    def _generate_spark_conf(self,
+                             min_heap_memory_per_task=4,
+                             task_cpus=1) -> dict:
+        user_spark_confs = self._parse_spark_conf()
+        # Create or retrieve the Spark session
+        spark = SparkSession.builder.appName("Generate Spark Config").getOrCreate()
+
+        # Get executor memory from user provided config or existing Spark conf
+        if user_spark_confs and "spark.executor.memory" in user_spark_confs:
+            executor_memory_str = user_spark_confs["spark.executor.memory"]
+        else:
+            executor_memory_str = spark.conf.get("spark.executor.memory", "32g")  # Default to 32 GB if not set
+
+        executor_memory_gb = Utilities.parse_memory_size(executor_memory_str)
+
+        # Calculate maximum number of tasks per executor
+        max_tasks_per_executor = int(executor_memory_gb // min_heap_memory_per_task)
+        executor_instances = 1  # One executor per node
+
+        # Configure Spark parameters
+        spark_conf = {
+            "spark.executor.instances": executor_instances,
+            "spark.executor.cores": max_tasks_per_executor,  # Each task gets a core
+            "spark.executor.memory": f"{int(executor_memory_gb)}g",
+            "spark.task.cpus": task_cpus
+        }
+
+        # Merge user provided Spark configurations if any
+        if user_spark_confs:
+            spark_conf.update(user_spark_confs)
+
+        spark.stop()
+        return spark_conf
+
     def _initialize_spark_context(self):
         spark_builder = SparkSession.builder.appName("Distributed Qualification Tool")
-        spark_confs = self._parse_spark_conf()
+        spark_confs = self._generate_spark_conf()
+        logging.info("Setting Spark configurations\n: %s", json.dumps(spark_confs, indent=4))
         for key, value in spark_confs.items():
             spark_builder.config(key, value)
         spark_builder.config("spark.submit.deployMode", "client")

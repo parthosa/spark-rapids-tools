@@ -59,3 +59,15 @@ class Utilities:
         return os.path.join(cls._DISTRIBUTED_TOOLS_CACHE_DIR,
                             output_folder_name,
                             cls._EXECUTOR_OUTPUT_DIR_NAME)
+
+    @classmethod
+    def parse_memory_size(cls, memory_str):
+        """Helper function to convert JVM memory string to float in gigabytes."""
+        if memory_str[-1] == 'g':
+            return float(memory_str[:-1])  # Remove 'g' and convert to float
+        elif memory_str[-1] == 'm':
+            return float(memory_str[:-1]) / 1024  # Convert MB to GB
+        elif memory_str[-1] == 'k':
+            return float(memory_str[:-1]) / (1024 ** 2)  # Convert KB to GB
+        else:
+            raise ValueError(f"Invalid memory size format: {memory_str}")
