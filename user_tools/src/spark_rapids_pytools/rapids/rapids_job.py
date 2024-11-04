@@ -113,7 +113,10 @@ class RapidsJob:
             self.logger.error('Error removing temporary log4j properties file: %s', e)
 
     def run_job(self):
-        self.run_job_distributed()
+        if self.exec_ctxt.is_distributed_mode():
+            self.run_job_distributed()
+        else:
+            self.run_job_local()
 
     def run_job_local(self):
         self.logger.info('Prepare job submission command')
@@ -255,6 +258,6 @@ class RapidsLocalJob(RapidsJob):
         return out_std
 
     def _submit_job_distributed(self, submission_cmd: ToolSubmissionCommand) -> None:
-        spark_master = "local[*]"
-        executor = DistributedJarExecutor(spark_master, submission_cmd)
+        spark_config_file = self.exec_ctxt.get_ctxt('distributedModeArgs').get('sparkConfigFile')
+        executor = DistributedJarExecutor(spark_config_file, submission_cmd)
         executor.run_tool_as_spark_app()

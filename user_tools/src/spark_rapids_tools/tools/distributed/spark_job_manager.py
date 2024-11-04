@@ -26,7 +26,7 @@ from spark_rapids_tools.tools.distributed.utils import Utilities
 
 @dataclass
 class SparkJobManager:
-    spark_master: str
+    spark_config_file: str
     dependencies_paths: List[str]
     jvm_log_file: str
     output_folder: str
@@ -52,11 +52,26 @@ class SparkJobManager:
         check_command = ["spark-submit", "--version"]
         Utilities.check_cmd_availability("spark-submit", check_command)
 
+    def _parse_spark_conf(self) -> dict:
+        spark_conf = {}
+        try:
+            # Read the config file and extract key-value pairs
+            with open(self.spark_config_file, 'r') as conf_file:
+                for line in conf_file:
+                    if line.strip() and not line.strip().startswith("#"):
+                        key, value = line.strip().split(None, 1)
+                        spark_conf[key] = value
+        except Exception as e:
+            logging.error(f"Error reading Spark configuration file: {e}")
+        return spark_conf
+
     def _initialize_spark_context(self):
-        spark = SparkSession.builder \
-            .appName("Distributed Qualification Tool") \
-            .master(self.spark_master) \
-            .getOrCreate()
+        spark_builder = SparkSession.builder.appName("Distributed Qualification Tool")
+        spark_confs = self._parse_spark_conf()
+        for key, value in spark_confs.items():
+            spark_builder.config(key, value)
+        spark_builder.config("spark.submit.deployMode", "client")
+        spark = spark_builder.getOrCreate()
         self._set_spark_context(spark.sparkContext)
         self._set_env()
 

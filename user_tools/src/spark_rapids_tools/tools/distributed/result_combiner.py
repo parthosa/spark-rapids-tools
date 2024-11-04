@@ -121,7 +121,7 @@ class RuntimePropertiesProcessor(FileProcessor):
         runtime_prop_file_path = Path(self.inner_directory.path) / 'runtime.properties'
         self.hdfs_fs.copy_file(runtime_prop_file_path.as_posix(), self.combined_output_path.as_posix())
 
-# Main ResultCombiner class that uses different processors
+
 @dataclass
 class ResultCombiner:
     output_folder: str = field(init=True)

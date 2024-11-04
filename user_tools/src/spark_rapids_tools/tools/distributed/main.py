@@ -32,7 +32,7 @@ JAVA_HOME = os.environ.get("JAVA_HOME")
 
 @dataclass
 class DistributedJarExecutor:
-    spark_master: str = field(init=True)
+    spark_config_file: str = field(init=True)
     submission_cmd: ToolSubmissionCommand = field(init=True)
     hdfs_manager: HdfsManager = field(init=False)
     spark_manager: SparkJobManager = field(init=False)
@@ -53,7 +53,7 @@ class DistributedJarExecutor:
         self.input_fs_manager = InputFsManager()
         eventlog_files = self.input_fs_manager.get_files_from_path(self.event_logs_path)
 
-        self.spark_manager = SparkJobManager(self.spark_master,
+        self.spark_manager = SparkJobManager(self.spark_config_file,
                                              self.submission_cmd.dependencies_paths,
                                              self.submission_cmd.jvm_log_file,
                                              self.submission_cmd.output_folder)
