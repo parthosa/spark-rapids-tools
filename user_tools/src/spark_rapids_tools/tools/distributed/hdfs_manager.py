@@ -27,6 +27,7 @@ class HdfsManager:
     output_folder_name: str
     executor_output_path: str = field(init=False)
     _HDFS_SCHEME: str = "hdfs"
+    hdfs_fs: fs.HadoopFileSystem = field(init=False)
 
     def __post_init__(self):
         assert os.getenv("HADOOP_HOME") is not None, "HADOOP_HOME environment variable is not set"
@@ -37,8 +38,10 @@ class HdfsManager:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Error retrieving Hadoop classpath") from e
 
+        self.hdfs_fs = fs.HadoopFileSystem("default")
         executor_output_path_raw = Utilities.get_executor_output_path(self.output_folder_name)
         self.executor_output_path = f"{self._HDFS_SCHEME}:///{executor_output_path_raw.strip('/')}"
+        self.hdfs_fs.create_dir(self.executor_output_path, recursive=True)
 
     @staticmethod
     def _run_hdfs_command(cmd_args: list, description: str):
@@ -49,13 +52,17 @@ class HdfsManager:
         except Exception as e:
             raise RuntimeError(f"Failed to run HDFS command: {description}, Error: {str(e)}")
 
+    def get_hdfs_fs(self) -> fs.HadoopFileSystem:
+        return self.hdfs_fs
+
+    @staticmethod
+    def get_local_fs() -> fs.LocalFileSystem:
+        return fs.LocalFileSystem()
+
 
 @dataclass
 class InputFsManager:
-    input_fs: fs.FileSystem = field(init=False)
-
-    def __post_init__(self):
-        self.input_fs = fs.HadoopFileSystem("default")
+    input_fs: fs.FileSystem = field(init=True)
 
     def get_files_from_path(self, directory: str) -> list:
         """Retrieve the list of files from a given directory in HDFS."""

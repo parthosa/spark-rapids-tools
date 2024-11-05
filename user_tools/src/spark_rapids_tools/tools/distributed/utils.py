@@ -17,11 +17,13 @@ import subprocess
 from typing import Optional
 
 from pyspark import SparkContext
+from pyarrow import fs
 
 
 class Utilities:
     _DISTRIBUTED_TOOLS_CACHE_DIR = "/tmp/spark_rapids_user_tools_distributed_cache"
     _EXECUTOR_OUTPUT_DIR_NAME = "executor_output"
+    _JAR_OUTPUT_DIR_NAME = "rapids_4_spark_qualification_output"
     _SPARK_CONTEXT: Optional[SparkContext] = None
 
     # Utility function to run shell commands with error handling
@@ -61,6 +63,10 @@ class Utilities:
                             cls._EXECUTOR_OUTPUT_DIR_NAME)
 
     @classmethod
+    def get_jar_output_path(cls, tools_output_folder: str) -> str:
+        return os.path.join(tools_output_folder, cls._JAR_OUTPUT_DIR_NAME)
+
+    @classmethod
     def parse_memory_size(cls, memory_str):
         """Helper function to convert JVM memory string to float in gigabytes."""
         if memory_str[-1] == 'g':
@@ -71,3 +77,11 @@ class Utilities:
             return float(memory_str[:-1]) / (1024 ** 2)  # Convert KB to GB
         else:
             raise ValueError(f"Invalid memory size format: {memory_str}")
+
+    @classmethod
+    def resource_exists(cls, resource_path: str, input_fs: fs.FileSystem) -> bool:
+        try:
+            file_info = input_fs.get_file_info(resource_path)
+            return file_info.type in {fs.FileType.File, fs.FileType.Directory}
+        except FileNotFoundError:
+            return False

@@ -14,6 +14,7 @@
 
 import fnmatch
 import json
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,8 @@ from urllib.parse import urlparse
 import pandas as pd
 from pyarrow import fs
 from pyarrow.fs import FileInfo
+
+from spark_rapids_tools.tools.distributed.utils import Utilities
 
 
 # Base class for all file processors
@@ -32,7 +35,11 @@ class FileProcessor(ABC):
         self.combined_output_path = combined_output_path
 
     def get_matching_files(self, pattern: str):
-        file_info = self.hdfs_fs.get_file_info(fs.FileSelector(self.inner_directory.path, recursive=False))
+        try:
+            file_info = self.hdfs_fs.get_file_info(fs.FileSelector(self.inner_directory.path, recursive=False))
+        except Exception as e:
+            logging.error(f"Error getting file info for {self.inner_directory.path}: {e}")
+            file_info = []
         return [info.path for info in file_info if info.is_file and fnmatch.fnmatch(info.path, pattern)]
 
     @abstractmethod
@@ -112,30 +119,31 @@ class RawMetricsProcessor(FileProcessor):
     def process(self):
         raw_metrics_path = Path(self.inner_directory.path) / "raw_metrics"
         # Copy the raw metrics directory to the combined output path using pyarrow.fs.copy_files()
-        fs.copy_files(raw_metrics_path.as_posix(), self.combined_output_path.as_posix(), source_filesystem=self.hdfs_fs)
+        # check if the raw_metrics directory exists using pyarrow
+        if Utilities.resource_exists(raw_metrics_path.as_posix(), self.hdfs_fs):
+            fs.copy_files(raw_metrics_path.as_posix(), self.combined_output_path.as_posix(), source_filesystem=self.hdfs_fs)
 
 
 # Runtime Properties Processor
 class RuntimePropertiesProcessor(FileProcessor):
     def process(self):
         runtime_prop_file_path = Path(self.inner_directory.path) / 'runtime.properties'
-        self.hdfs_fs.copy_file(runtime_prop_file_path.as_posix(), self.combined_output_path.as_posix())
+        if Utilities.resource_exists(runtime_prop_file_path.as_posix(), self.hdfs_fs):
+            self.hdfs_fs.copy_file(runtime_prop_file_path.as_posix(), self.combined_output_path.as_posix())
 
 
 @dataclass
 class ResultCombiner:
     output_folder: str = field(init=True)
     executor_output_dir: str = field(init=True)
-    jar_output_dir_name: str = field(default='rapids_4_spark_qualification_output', init=False)
+    hdfs_fs: fs.HadoopFileSystem = field(init=True)
     combined_dataframes: dict = field(default_factory=dict, init=False)
     combined_json_data: dict = field(default_factory=dict, init=False)
     combined_output_path: Path = field(init=False)
-    hdfs: fs.HadoopFileSystem = field(init=False)
 
     def __post_init__(self):
         # Set up paths
-        self.hdfs = fs.HadoopFileSystem("default")
-        self.combined_output_path = Path(self.output_folder) / self.jar_output_dir_name
+        self.combined_output_path = Path(Utilities.get_jar_output_path(self.output_folder))
         self.combined_output_path.mkdir(parents=True, exist_ok=True)
 
     def combine_results(self):
@@ -143,9 +151,9 @@ class ResultCombiner:
         print(f"Combining results from {self.executor_output_dir} to {self.combined_output_path}")
         executor_output_dir_no_scheme = urlparse(self.executor_output_dir).path
         # list of directories in the executor output directory (it is an hdfs path)
-        directories = self.hdfs.get_file_info(fs.FileSelector(executor_output_dir_no_scheme, recursive=False))
+        directories = self.hdfs_fs.get_file_info(fs.FileSelector(executor_output_dir_no_scheme, recursive=False))
         for directory in directories:
-            inner_dir_info = self.hdfs.get_file_info(fs.FileSelector(directory.path, recursive=False))
+            inner_dir_info = self.hdfs_fs.get_file_info(fs.FileSelector(directory.path, recursive=False))
             if not inner_dir_info:
                 continue
 
@@ -153,13 +161,13 @@ class ResultCombiner:
 
             # # Process runtime properties once
             if not self.combined_dataframes:
-                RuntimePropertiesProcessor(inner_dir_info,  self.hdfs, self.combined_output_path).process()
+                RuntimePropertiesProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path).process()
 
             # Use the specific processors for different file types
-            CSVProcessor(inner_dir_info, self.hdfs, self.combined_output_path, self.combined_dataframes).process()
-            JSONProcessor(inner_dir_info, self.hdfs, self.combined_output_path, self.combined_json_data).process()
-            LogProcessor(inner_dir_info, self.hdfs, self.combined_output_path).process()
-            RawMetricsProcessor(inner_dir_info, self.hdfs, self.combined_output_path).process()
+            CSVProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path, self.combined_dataframes).process()
+            JSONProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path, self.combined_json_data).process()
+            LogProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path).process()
+            RawMetricsProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path).process()
 
         # Write the combined CSV and JSON data
         self._write_combined_csv()

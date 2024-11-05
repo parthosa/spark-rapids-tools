@@ -364,7 +364,7 @@ class Qualification(RapidsJarTool):
 
         df = self._read_qualification_output_file('summaryReport')
         # 1. Operations related to XGboost modelling
-        if self.ctxt.get_ctxt('estimationModelArgs')['xgboostEnabled']:
+        if self.ctxt.get_ctxt('estimationModelArgs')['xgboostEnabled'] and not df.empty:
             try:
                 df = self.__update_apps_with_prediction_info(df,
                                                              self.ctxt.get_ctxt('estimationModelArgs'))
@@ -598,7 +598,11 @@ class Qualification(RapidsJarTool):
         # extract the file name of report from the YAML config (e.g., toolOutput -> csv -> summaryReport -> fileName)
         report_file_name = self.ctxt.get_value('toolOutput', file_format_key, report_name_key, 'fileName')
         report_file_path = FSUtil.build_path(self.ctxt.get_rapids_output_folder(), report_file_name)
-        return pd.read_csv(report_file_path)
+        try:
+            return pd.read_csv(report_file_path)
+        except FileNotFoundError:
+            self.logger.warning(f'Failed to read report file: {report_file_path}')
+            return pd.DataFrame()
 
 
 @dataclass
