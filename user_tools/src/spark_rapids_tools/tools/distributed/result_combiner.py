@@ -40,7 +40,7 @@ class FileProcessor(ABC):
 
     def get_matching_files(self, pattern: str):
         try:
-            file_info = self.hdfs_fs.get_file_info(fs.FileSelector(self.inner_directory.path, recursive=False))
+            file_info = self.hdfs_fs.get_file_info(fs.FileSelector(self.inner_directory.path))
         except Exception as e:  # pylint: disable=broad-except
             logging.error('Error getting file info for %s: %s', self.inner_directory.path, e)
             file_info = []
@@ -168,9 +168,9 @@ class ResultCombiner:
         print(f'Combining results from {self.executor_output_dir} to {self.combined_output_path}')
         executor_output_dir_no_scheme = urlparse(self.executor_output_dir).path
         # list of directories in the executor output directory (it is a hdfs path)
-        directories = self.hdfs_fs.get_file_info(fs.FileSelector(executor_output_dir_no_scheme, recursive=False))
+        directories = self.hdfs_fs.get_file_info(fs.FileSelector(executor_output_dir_no_scheme))
         for directory in directories:
-            inner_dir_info = self.hdfs_fs.get_file_info(fs.FileSelector(directory.path, recursive=False))
+            inner_dir_info = self.hdfs_fs.get_file_info(fs.FileSelector(directory.path))
             if not inner_dir_info:
                 continue
 

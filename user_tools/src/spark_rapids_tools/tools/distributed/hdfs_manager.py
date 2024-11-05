@@ -73,7 +73,7 @@ class InputFsManager:
     def get_files_from_path(self, directory: str) -> list:
         """Retrieve the list of files from a given directory in HDFS."""
         parsed_url = urlparse(directory)
-        file_infos = self.input_fs.get_file_info(fs.FileSelector(parsed_url.path, recursive=False))
+        file_infos = self.input_fs.get_file_info(fs.FileSelector(parsed_url.path))
         uris = []
         for info in file_infos:
             if info.type == fs.FileType.File:
