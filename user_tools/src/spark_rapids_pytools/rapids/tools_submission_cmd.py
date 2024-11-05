@@ -14,8 +14,6 @@
 
 """ ToolSubmissionCommand class definition """
 
-import os
-import glob
 import re
 from dataclasses import dataclass, field
 from typing import List
@@ -23,6 +21,10 @@ from typing import List
 
 @dataclass
 class ToolSubmissionCommand:
+    """
+    Wrapper class to store the arguments required to run the Tools JAVA application.
+    """
+
     jvm_args: List[str]
     classpath_arr: List[str]
     hadoop_classpath: str

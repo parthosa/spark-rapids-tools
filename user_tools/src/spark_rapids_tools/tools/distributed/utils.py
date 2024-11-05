@@ -1,16 +1,18 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
+# Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
+# distributed under the License is distributed on an 'AS IS' BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+""" Utility functions for distributed tools """
 
 import os
 import subprocess
@@ -21,9 +23,13 @@ from pyarrow import fs
 
 
 class Utilities:
-    _DISTRIBUTED_TOOLS_CACHE_DIR = "/tmp/spark_rapids_user_tools_distributed_cache"
-    _EXECUTOR_OUTPUT_DIR_NAME = "executor_output"
-    _JAR_OUTPUT_DIR_NAME = "rapids_4_spark_qualification_output"
+    """ Utility functions for distributed tools """
+
+    _DISTRIBUTED_TOOLS_CACHE_DIR = '/tmp/spark_rapids_user_tools_distributed_cache'
+    _EXECUTOR_OUTPUT_DIR_NAME = 'executor_output'
+    _JAR_OUTPUT_DIR_NAME = 'rapids_4_spark_qualification_output'
+    _DEFAULT_LOG_FILE_NAME = 'distributed_qual_tool.log'
+
     _SPARK_CONTEXT: Optional[SparkContext] = None
 
     # Utility function to run shell commands with error handling
@@ -32,13 +38,12 @@ class Utilities:
         try:
             res = subprocess.run(command, check=True, capture_output=True, text=True)
             if description:
-                print(f"SUCCESS: {description or ' '.join(command)}")
+                print(f'SUCCESS: {description or " ".join(command)}')
             return res
         except subprocess.CalledProcessError as e:
             if description:
-                raise Exception(f"ERROR: {description or ' '.join(command)}\n{e.stderr}")
-            else:
-                raise Exception(f"ERROR: {' '.join(command)}\n{e.stderr}")
+                raise Exception(f'ERROR: {description or " ".join(command)}\n{e.stderr}') from e
+            raise Exception(f'ERROR: {" ".join(command)}\n{e.stderr}') from e
 
     @classmethod    # Utility function to check if a command is available
     def check_cmd_availability(cls, cmd, check_cmd):
@@ -51,7 +56,7 @@ class Utilities:
                 raise FileNotFoundError(error_msg)
 
         try:
-            run_and_check(["which", cmd])
+            run_and_check(['which', cmd])
             run_and_check(check_cmd)
         except FileNotFoundError as e:
             raise e
@@ -67,16 +72,28 @@ class Utilities:
         return os.path.join(tools_output_folder, cls._JAR_OUTPUT_DIR_NAME)
 
     @classmethod
-    def parse_memory_size(cls, memory_str):
-        """Helper function to convert JVM memory string to float in gigabytes."""
-        if memory_str[-1] == 'g':
-            return float(memory_str[:-1])  # Remove 'g' and convert to float
-        elif memory_str[-1] == 'm':
-            return float(memory_str[:-1]) / 1024  # Convert MB to GB
-        elif memory_str[-1] == 'k':
-            return float(memory_str[:-1]) / (1024 ** 2)  # Convert KB to GB
-        else:
-            raise ValueError(f"Invalid memory size format: {memory_str}")
+    def get_log_file_path(cls, tools_output_folder: str) -> str:
+        return os.path.join(tools_output_folder, cls._DEFAULT_LOG_FILE_NAME)
+
+    @classmethod
+    def parse_memory_size(cls, memory_str: str) -> float:
+        """
+        Helper function to convert JVM memory string to float in gigabytes.
+        """
+        if not memory_str or len(memory_str) < 2:
+            raise ValueError("Memory size string must include a value and a unit (e.g., '512m', '2g').")
+
+        unit = memory_str[-1].lower()
+        size_value = float(memory_str[:-1])
+
+        if unit == 'g':
+            return size_value
+        if unit == 'm':
+            return size_value / 1024  # Convert MB to GB
+        if unit == 'k':
+            return size_value / (1024 ** 2)  # Convert KB to GB
+
+        raise ValueError(f"Invalid memory unit '{unit}' in memory size: '{memory_str}'")
 
     @classmethod
     def resource_exists(cls, resource_path: str, input_fs: fs.FileSystem) -> bool:

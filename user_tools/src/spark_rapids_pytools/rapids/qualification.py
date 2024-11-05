@@ -601,7 +601,7 @@ class Qualification(RapidsJarTool):
         try:
             return pd.read_csv(report_file_path)
         except FileNotFoundError:
-            self.logger.warning(f'Failed to read report file: {report_file_path}')
+            self.logger.warning('Failed to read report file: %s', report_file_path)
             return pd.DataFrame()
 
 

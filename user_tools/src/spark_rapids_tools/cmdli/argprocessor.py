@@ -780,5 +780,3 @@ class DistributedModeArgProcessor(AbsToolUserArgModel):
             'distributedModeEnabled': self.distributed_mode,
             'sparkConfigFile': self.spark_config_file,
         }
-
-

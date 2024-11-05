@@ -1,16 +1,18 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
+# Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
+# distributed under the License is distributed on an 'AS IS' BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+""" Module to combine results from multiple executors. """
 
 import fnmatch
 import json
@@ -29,6 +31,8 @@ from spark_rapids_tools.tools.distributed.utils import Utilities
 
 # Base class for all file processors
 class FileProcessor(ABC):
+    """ Base class for all file processors. """
+
     def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.HadoopFileSystem, combined_output_path: Path):
         self.inner_directory = inner_directory
         self.hdfs_fs = hdfs_fs
@@ -37,19 +41,20 @@ class FileProcessor(ABC):
     def get_matching_files(self, pattern: str):
         try:
             file_info = self.hdfs_fs.get_file_info(fs.FileSelector(self.inner_directory.path, recursive=False))
-        except Exception as e:
-            logging.error(f"Error getting file info for {self.inner_directory.path}: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            logging.error('Error getting file info for %s: %s', self.inner_directory.path, e)
             file_info = []
         return [info.path for info in file_info if info.is_file and fnmatch.fnmatch(info.path, pattern)]
 
     @abstractmethod
     def process(self):
         """Abstract method for processing files."""
-        pass
 
 
 # CSV Processor
 class CSVProcessor(FileProcessor):
+    """ Class to process CSV files. """
+
     def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.HadoopFileSystem,
                  combined_output_path: Path, combined_dataframes: dict):
         super().__init__(inner_directory, hdfs_fs, combined_output_path)
@@ -57,7 +62,7 @@ class CSVProcessor(FileProcessor):
 
     def process(self):
         #  list all the csv files in the inner directory
-        csv_files = self.get_matching_files(pattern="*.csv")
+        csv_files = self.get_matching_files(pattern='*.csv')
         for file_info in csv_files:
             file_path = Path(file_info)
             with self.hdfs_fs.open_input_file(file_info) as file:
@@ -69,39 +74,43 @@ class CSVProcessor(FileProcessor):
                         )
                     else:
                         self.combined_dataframes[file_path.name] = csv_data
-                except Exception as e:
-                    raise RuntimeError(f"Error processing CSV {file_path}: {e}")
+                except Exception as e:  # pylint: disable=broad-except
+                    raise RuntimeError(f'Error processing CSV {file_path}: {e}') from e
 
 
 # JSON Processor
 class JSONProcessor(FileProcessor):
+    """ Class to process JSON files. """
+
     def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.HadoopFileSystem,
                  combined_output_path: Path, combined_json_data: dict):
         super().__init__(inner_directory, hdfs_fs, combined_output_path)
         self.combined_json_data = combined_json_data
 
     def process(self):
-        json_files = self.get_matching_files(pattern="*.json")
+        json_files = self.get_matching_files(pattern='*.json')
         for file_info in json_files:
             file_path = Path(file_info)
             with self.hdfs_fs.open_input_file(file_info) as file:
                 try:
                     data = json.load(file)
                     if not (isinstance(data, list) and all(isinstance(item, dict) for item in data)):
-                        raise ValueError(f"Unexpected format in {file_path}: expected list of dictionaries.")
+                        raise ValueError(f'Unexpected format in {file_path}: expected list of dictionaries.')
 
                     if file_path.name in self.combined_json_data:
                         self.combined_json_data[file_path.name].extend(data)
                     else:
                         self.combined_json_data[file_path.name] = data
-                except Exception as e:
-                    raise RuntimeError(f"Error processing JSON {file_path}: {e}")
+                except Exception as e:  # pylint: disable=broad-except
+                    raise RuntimeError(f'Error processing JSON {file_path}: {e}') from e
 
 
 # Log Processor
 class LogProcessor(FileProcessor):
+    """ Class to process log files. """
+
     def process(self):
-        log_files = self.get_matching_files(pattern="*.log")
+        log_files = self.get_matching_files(pattern='*.log')
         for file_info in log_files:
             file_path = Path(file_info)
             with self.hdfs_fs.open_input_file(file_info) as file:
@@ -110,22 +119,28 @@ class LogProcessor(FileProcessor):
                     output_file = self.combined_output_path / file_path.name
                     with output_file.open('a') as out_file:
                         out_file.write(content)
-                except Exception as e:
-                    raise RuntimeError(f"Error processing log file {file_path}: {e}")
+                except Exception as e:  # pylint: disable=broad-except
+                    raise RuntimeError(f'Error processing log file {file_path}: {e}') from e
 
 
 # Raw Metrics Processor
 class RawMetricsProcessor(FileProcessor):
+    """ Class to process raw metrics folder. """
+
     def process(self):
-        raw_metrics_path = Path(self.inner_directory.path) / "raw_metrics"
+        raw_metrics_path = Path(self.inner_directory.path) / 'raw_metrics'
         # Copy the raw metrics directory to the combined output path using pyarrow.fs.copy_files()
         # check if the raw_metrics directory exists using pyarrow
         if Utilities.resource_exists(raw_metrics_path.as_posix(), self.hdfs_fs):
-            fs.copy_files(raw_metrics_path.as_posix(), self.combined_output_path.as_posix(), source_filesystem=self.hdfs_fs)
+            fs.copy_files(source=raw_metrics_path.as_posix(),
+                          destination=self.combined_output_path.as_posix(),
+                          source_filesystem=self.hdfs_fs)
 
 
 # Runtime Properties Processor
 class RuntimePropertiesProcessor(FileProcessor):
+    """ Class to process runtime properties file. """
+
     def process(self):
         runtime_prop_file_path = Path(self.inner_directory.path) / 'runtime.properties'
         if Utilities.resource_exists(runtime_prop_file_path.as_posix(), self.hdfs_fs):
@@ -134,6 +149,8 @@ class RuntimePropertiesProcessor(FileProcessor):
 
 @dataclass
 class ResultCombiner:
+    """ Class to combine results from multiple executors. """
+
     output_folder: str = field(init=True)
     executor_output_dir: str = field(init=True)
     hdfs_fs: fs.HadoopFileSystem = field(init=True)
@@ -148,9 +165,9 @@ class ResultCombiner:
 
     def combine_results(self):
         """Main method to combine all results."""
-        print(f"Combining results from {self.executor_output_dir} to {self.combined_output_path}")
+        print(f'Combining results from {self.executor_output_dir} to {self.combined_output_path}')
         executor_output_dir_no_scheme = urlparse(self.executor_output_dir).path
-        # list of directories in the executor output directory (it is an hdfs path)
+        # list of directories in the executor output directory (it is a hdfs path)
         directories = self.hdfs_fs.get_file_info(fs.FileSelector(executor_output_dir_no_scheme, recursive=False))
         for directory in directories:
             inner_dir_info = self.hdfs_fs.get_file_info(fs.FileSelector(directory.path, recursive=False))
