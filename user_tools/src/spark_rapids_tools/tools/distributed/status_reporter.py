@@ -20,7 +20,6 @@ import pandas as pd
 from pyarrow import fs
 
 from spark_rapids_tools import EnumeratedType
-from spark_rapids_tools.tools.distributed.utils import Utilities
 
 
 class AppStatus(EnumeratedType):
@@ -58,14 +57,13 @@ class AppStatusResult:
             self.DESCRIPTION: self.message
         }
 
-    def write_to_csv(self, tools_output_dir: str, output_fs: fs.FileSystem) -> None:
+    def write_to_csv(self, jar_output_dir: str, output_fs: fs.FileSystem) -> None:
         """
         Write a list of application status results to a CSV file using Pandas.
 
-        :param tools_output_dir: The directory to write the CSV file to.
+        :param jar_output_dir: The directory to write the CSV file to.
         :param output_fs: The filesystem to write the CSV file to.
         """
-        jar_output_dir = Utilities.get_jar_output_path(tools_output_dir)
         output_fs.create_dir(jar_output_dir)
         status_csv_file_path = os.path.join(jar_output_dir, self.STATUS_CSV_FILE_NAME)
         # Write the status to a CSV file

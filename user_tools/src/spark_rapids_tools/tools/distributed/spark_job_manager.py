@@ -33,7 +33,7 @@ class SparkJobManager:
     spark_config_file: str
     dependencies_paths: List[str]
     jvm_log_file: str
-    output_folder: str
+    log_file_path: str
     _spark_context: SparkContext = field(default=None, init=False)
 
     def __post_init__(self):
@@ -150,12 +150,11 @@ class SparkJobManager:
             raise
 
     def submit_map_job(self, map_func: Callable, input_list: list) -> list:
-        log_file_path = Utilities.get_log_file_path(self.output_folder)
         input_list_rdd = self._convert_input_to_rdd(input_list)
         try:
             map_fn_result, total_time = self._run_map_job(map_func, input_list_rdd)
             logs_arr_list, result = zip(*map_fn_result)
-            self._write_output(log_file_path, logs_arr_list, total_time)
+            self._write_output(self.log_file_path, logs_arr_list, total_time)
             return list(result)
         except Exception as e:
             logging.error('Error during map job submission: %s', e)

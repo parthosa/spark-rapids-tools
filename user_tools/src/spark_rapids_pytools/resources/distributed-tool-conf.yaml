@@ -1,0 +1,4 @@
+cacheDir: "/tmp/spark_rapids_user_tools_distributed_cache"
+executorOutputDirName: "executor_output"
+jarOutputDirName: "rapids_4_spark_qualification_output"
+logFileName: "distributed_qual_tool.log"

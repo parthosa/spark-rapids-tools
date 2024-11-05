@@ -16,6 +16,7 @@
 
 import os
 import subprocess
+from abc import ABC
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -25,13 +26,23 @@ from spark_rapids_tools.tools.distributed.utils import Utilities
 
 
 @dataclass
-class HdfsManager:
-    """ HDFS Manager class for managing HDFS operations. """
-    output_folder_name: str
-    executor_output_path: str = field(init=False)
-    hdfs_fs: fs.HadoopFileSystem = field(init=False)
+class FsManager(ABC):
+    """ Abstract class for managing file operations. """
 
-    _hdfs_scheme: str = 'hdfs'
+    _base_fs: fs.FileSystem = field(init=False)
+    _scheme: str = field(init=False)
+
+    def get_fs(self) -> fs.FileSystem:
+        return self._base_fs
+
+    def get_scheme(self) -> str:
+        return self._scheme
+
+
+@dataclass
+class HdfsManager(FsManager):
+    """ HDFS Manager class for managing HDFS operations. """
+    _scheme: str = 'hdfs'
 
     def __post_init__(self):
         assert os.getenv('HADOOP_HOME') is not None, 'HADOOP_HOME environment variable is not set'
@@ -41,11 +52,7 @@ class HdfsManager:
             os.environ['CLASSPATH'] = result.stdout.strip()
         except subprocess.CalledProcessError as e:
             raise RuntimeError('Error retrieving Hadoop classpath') from e
-
-        self.hdfs_fs = fs.HadoopFileSystem('default')
-        executor_output_path_raw = Utilities.get_executor_output_path(self.output_folder_name)
-        self.executor_output_path = f'{self._hdfs_scheme}:///{executor_output_path_raw.strip("/")}'
-        self.hdfs_fs.create_dir(self.executor_output_path, recursive=True)
+        self._base_fs = fs.HadoopFileSystem('default')
 
     @staticmethod
     def _run_hdfs_command(cmd_args: list, description: str):
@@ -56,27 +63,29 @@ class HdfsManager:
         except Exception as e:
             raise RuntimeError(f'Failed to run HDFS command: {description}, Error: {str(e)}') from e
 
-    def get_hdfs_fs(self) -> fs.HadoopFileSystem:
-        return self.hdfs_fs
 
-    @staticmethod
-    def get_local_fs() -> fs.LocalFileSystem:
-        return fs.LocalFileSystem()
+@dataclass
+class LocalFsManager(FsManager):
+    """ Local FileSystem Manager class for managing file operations. """
+    _scheme: str = 'file'
+
+    def __post_init__(self):
+        self._base_fs = fs.LocalFileSystem()
 
 
 @dataclass
 class InputFsManager:
     """ Input FileSystem Manager class for managing file operations. """
 
-    input_fs: fs.FileSystem = field(init=True)
+    input_fs_manager: FsManager = field(init=True)
 
     def get_files_from_path(self, directory: str) -> list:
         """Retrieve the list of files from a given directory in HDFS."""
         parsed_url = urlparse(directory)
-        file_infos = self.input_fs.get_file_info(fs.FileSelector(parsed_url.path))
+        file_infos = self.input_fs_manager.get_fs().get_file_info(fs.FileSelector(parsed_url.path))
         uris = []
         for info in file_infos:
             if info.type == fs.FileType.File:
-                uri = f'{parsed_url.scheme}://{parsed_url.netloc}/{info.path.strip("/")}'
+                uri = f'{self.input_fs_manager.get_scheme()}://{parsed_url.netloc}/{info.path.strip("/")}'
                 uris.append(uri)
         return uris

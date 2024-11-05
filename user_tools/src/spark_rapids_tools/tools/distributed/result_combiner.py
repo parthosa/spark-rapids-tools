@@ -17,6 +17,7 @@
 import fnmatch
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,10 +34,10 @@ from spark_rapids_tools.tools.distributed.utils import Utilities
 class FileProcessor(ABC):
     """ Base class for all file processors. """
 
-    def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.HadoopFileSystem, combined_output_path: Path):
+    def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.FileSystem, jar_output_folder: str):
         self.inner_directory = inner_directory
         self.hdfs_fs = hdfs_fs
-        self.combined_output_path = combined_output_path
+        self.jar_output_folder = jar_output_folder
 
     def get_matching_files(self, pattern: str):
         try:
@@ -55,9 +56,9 @@ class FileProcessor(ABC):
 class CSVProcessor(FileProcessor):
     """ Class to process CSV files. """
 
-    def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.HadoopFileSystem,
-                 combined_output_path: Path, combined_dataframes: dict):
-        super().__init__(inner_directory, hdfs_fs, combined_output_path)
+    def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.FileSystem,
+                 jar_output_folder: str, combined_dataframes: dict):
+        super().__init__(inner_directory, hdfs_fs, jar_output_folder)
         self.combined_dataframes = combined_dataframes
 
     def process(self):
@@ -82,9 +83,9 @@ class CSVProcessor(FileProcessor):
 class JSONProcessor(FileProcessor):
     """ Class to process JSON files. """
 
-    def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.HadoopFileSystem,
-                 combined_output_path: Path, combined_json_data: dict):
-        super().__init__(inner_directory, hdfs_fs, combined_output_path)
+    def __init__(self, inner_directory: FileInfo, hdfs_fs: fs.FileSystem,
+                 jar_output_folder: str, combined_json_data: dict):
+        super().__init__(inner_directory, hdfs_fs, jar_output_folder)
         self.combined_json_data = combined_json_data
 
     def process(self):
@@ -116,8 +117,8 @@ class LogProcessor(FileProcessor):
             with self.hdfs_fs.open_input_file(file_info) as file:
                 try:
                     content = file.read().decode('utf-8')
-                    output_file = self.combined_output_path / file_path.name
-                    with output_file.open('a') as out_file:
+                    output_file = os.path.join(self.jar_output_folder, file_path.name)
+                    with open(output_file, 'a', encoding='utf-8') as out_file:
                         out_file.write(content)
                 except Exception as e:  # pylint: disable=broad-except
                     raise RuntimeError(f'Error processing log file {file_path}: {e}') from e
@@ -128,12 +129,12 @@ class RawMetricsProcessor(FileProcessor):
     """ Class to process raw metrics folder. """
 
     def process(self):
-        raw_metrics_path = Path(self.inner_directory.path) / 'raw_metrics'
+        raw_metrics_path = os.path.join(self.inner_directory.path, 'raw_metrics')
         # Copy the raw metrics directory to the combined output path using pyarrow.fs.copy_files()
         # check if the raw_metrics directory exists using pyarrow
-        if Utilities.resource_exists(raw_metrics_path.as_posix(), self.hdfs_fs):
-            fs.copy_files(source=raw_metrics_path.as_posix(),
-                          destination=self.combined_output_path.as_posix(),
+        if Utilities.resource_exists(raw_metrics_path, self.hdfs_fs):
+            fs.copy_files(source=raw_metrics_path,
+                          destination=self.jar_output_folder,
                           source_filesystem=self.hdfs_fs)
 
 
@@ -142,30 +143,24 @@ class RuntimePropertiesProcessor(FileProcessor):
     """ Class to process runtime properties file. """
 
     def process(self):
-        runtime_prop_file_path = Path(self.inner_directory.path) / 'runtime.properties'
-        if Utilities.resource_exists(runtime_prop_file_path.as_posix(), self.hdfs_fs):
-            self.hdfs_fs.copy_file(runtime_prop_file_path.as_posix(), self.combined_output_path.as_posix())
+        runtime_prop_file_path = os.path.join(self.inner_directory.path, 'runtime.properties')
+        if Utilities.resource_exists(runtime_prop_file_path, self.hdfs_fs):
+            self.hdfs_fs.copy_file(runtime_prop_file_path, self.jar_output_folder)
 
 
 @dataclass
 class ResultCombiner:
     """ Class to combine results from multiple executors. """
 
-    output_folder: str = field(init=True)
+    jar_output_folder: str = field(init=True)
     executor_output_dir: str = field(init=True)
-    hdfs_fs: fs.HadoopFileSystem = field(init=True)
+    hdfs_fs: fs.FileSystem = field(init=True)
     combined_dataframes: dict = field(default_factory=dict, init=False)
     combined_json_data: dict = field(default_factory=dict, init=False)
-    combined_output_path: Path = field(init=False)
-
-    def __post_init__(self):
-        # Set up paths
-        self.combined_output_path = Path(Utilities.get_jar_output_path(self.output_folder))
-        self.combined_output_path.mkdir(parents=True, exist_ok=True)
 
     def combine_results(self):
         """Main method to combine all results."""
-        print(f'Combining results from {self.executor_output_dir} to {self.combined_output_path}')
+        print(f'Combining results from {self.executor_output_dir} to {self.jar_output_folder}')
         executor_output_dir_no_scheme = urlparse(self.executor_output_dir).path
         # list of directories in the executor output directory (it is a hdfs path)
         directories = self.hdfs_fs.get_file_info(fs.FileSelector(executor_output_dir_no_scheme))
@@ -178,13 +173,13 @@ class ResultCombiner:
 
             # # Process runtime properties once
             if not self.combined_dataframes:
-                RuntimePropertiesProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path).process()
+                RuntimePropertiesProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder).process()
 
             # Use the specific processors for different file types
-            CSVProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path, self.combined_dataframes).process()
-            JSONProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path, self.combined_json_data).process()
-            LogProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path).process()
-            RawMetricsProcessor(inner_dir_info, self.hdfs_fs, self.combined_output_path).process()
+            CSVProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder, self.combined_dataframes).process()
+            JSONProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder, self.combined_json_data).process()
+            LogProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder).process()
+            RawMetricsProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder).process()
 
         # Write the combined CSV and JSON data
         self._write_combined_csv()
@@ -193,12 +188,12 @@ class ResultCombiner:
     def _write_combined_csv(self):
         """Write the combined CSV data to the output folder."""
         for filename, dataframe in self.combined_dataframes.items():
-            output_path = self.combined_output_path / filename
+            output_path = os.path.join(self.jar_output_folder, filename)
             dataframe.to_csv(output_path, index=False)
 
     def _write_combined_json(self):
         """Write the combined JSON data to the output folder."""
         for filename, data in self.combined_json_data.items():
-            output_path = self.combined_output_path / filename
-            with output_path.open('w') as file:
+            output_path = os.path.join(self.jar_output_folder, filename)
+            with open(output_path, 'w', encoding='utf-8') as file:
                 json.dump(data, file, indent=2)

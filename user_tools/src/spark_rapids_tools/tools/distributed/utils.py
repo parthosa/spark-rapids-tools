@@ -14,23 +14,13 @@
 
 """ Utility functions for distributed tools """
 
-import os
 import subprocess
-from typing import Optional
 
-from pyspark import SparkContext
 from pyarrow import fs
 
 
 class Utilities:
     """ Utility functions for distributed tools """
-
-    _DISTRIBUTED_TOOLS_CACHE_DIR = '/tmp/spark_rapids_user_tools_distributed_cache'
-    _EXECUTOR_OUTPUT_DIR_NAME = 'executor_output'
-    _JAR_OUTPUT_DIR_NAME = 'rapids_4_spark_qualification_output'
-    _DEFAULT_LOG_FILE_NAME = 'distributed_qual_tool.log'
-
-    _SPARK_CONTEXT: Optional[SparkContext] = None
 
     # Utility function to run shell commands with error handling
     @classmethod
@@ -60,20 +50,6 @@ class Utilities:
             run_and_check(check_cmd)
         except FileNotFoundError as e:
             raise e
-
-    @classmethod
-    def get_executor_output_path(cls, output_folder_name: str) -> str:
-        return os.path.join(cls._DISTRIBUTED_TOOLS_CACHE_DIR,
-                            output_folder_name,
-                            cls._EXECUTOR_OUTPUT_DIR_NAME)
-
-    @classmethod
-    def get_jar_output_path(cls, tools_output_folder: str) -> str:
-        return os.path.join(tools_output_folder, cls._JAR_OUTPUT_DIR_NAME)
-
-    @classmethod
-    def get_log_file_path(cls, tools_output_folder: str) -> str:
-        return os.path.join(tools_output_folder, cls._DEFAULT_LOG_FILE_NAME)
 
     @classmethod
     def parse_memory_size(cls, memory_str: str) -> float:
