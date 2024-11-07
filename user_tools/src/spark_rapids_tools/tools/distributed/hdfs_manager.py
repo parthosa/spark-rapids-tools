@@ -57,7 +57,10 @@ class HdfsManager(FsManager):
     @staticmethod
     def _run_hdfs_command(cmd_args: list, description: str):
         """Run an HDFS command and log its description."""
-        command = [f'{os.getenv("HADOOP_HOME")}/bin/hdfs'] + cmd_args
+        hdfs_bin = f'{os.getenv("HADOOP_HOME")}/bin/hdfs'
+        hadoop_bin = f'{os.getenv("HADOOP_HOME")}/bin/hadoop'
+        actual_bin = hdfs_bin if os.path.exists(hdfs_bin) else hadoop_bin
+        command = [actual_bin] + cmd_args
         try:
             return Utilities.run_cmd(command, description)
         except Exception as e:
