@@ -21,7 +21,11 @@ from dataclasses import dataclass, field
 from typing import List
 from urllib.parse import urlparse
 
+import pandas as pd
+from pyarrow import fs
+
 from spark_rapids_pytools.common.prop_manager import YAMLPropertiesContainer
+from spark_rapids_pytools.common.sys_storage import FSUtil
 from spark_rapids_pytools.common.utilities import Utils
 from spark_rapids_pytools.rapids.tools_submission_cmd import ToolSubmissionCommand
 from spark_rapids_tools.tools.distributed.hdfs_manager import HdfsManager, InputFsManager, LocalFsManager, FsManager
@@ -29,6 +33,7 @@ from spark_rapids_tools.tools.distributed.result_combiner import ResultCombiner
 from spark_rapids_tools.tools.distributed.spark_job_manager import SparkJobManager
 from distributed.status_reporter import AppStatusResult, AppStatus
 from distributed.spark_job import SparkJobConfig, SparkJobRunner
+
 
 @dataclass
 class DistributedJarExecutor:
@@ -56,6 +61,9 @@ class DistributedJarExecutor:
         self.props = YAMLPropertiesContainer(prop_arg=config_path)
         self.hdfs_manager = HdfsManager()
         self.local_fs_manager = LocalFsManager()
+        cache_dir = self.props.get_value('cacheDir')
+        if not FSUtil.resource_exists(cache_dir):
+            FSUtil.make_dirs(cache_dir)
 
     def run_as_spark_app(self):
         jar_output_path = self._get_jar_output_path()
@@ -65,10 +73,10 @@ class DistributedJarExecutor:
         except Exception as e:  # pylint: disable=broad-except
             exception_msg = f'Failed to run the tool as a Spark application: {str(e)}'
             failed_app = AppStatusResult(path=self.event_logs_path, status=AppStatus.FAILURE, message=exception_msg)
-            failed_app.write_to_csv(jar_output_path, self.local_fs_manager.get_fs())
+            self._write_to_csv(failed_app, jar_output_path, self.local_fs_manager.get_fs())
 
     def _run_as_spark_app_internal(self):
-        executor_output_path = self._get_executor_output_path()
+        executor_output_path = self._get_hdfs_executor_output_path()
         self.hdfs_manager.get_fs().create_dir(executor_output_path, recursive=True)
 
         # TODO: Add support for other file systems as input paths (e.g., S3, GCS)
@@ -78,7 +86,8 @@ class DistributedJarExecutor:
         self.spark_manager = SparkJobManager(self.spark_config_file,
                                              self.submission_cmd.dependencies_paths,
                                              self.submission_cmd.jvm_log_file,
-                                             self._get_log_file_path())
+                                             self._get_log_file_path(),
+                                             self._get_local_cache_dir())
         # Define the dictionary with arguments
         config_instance = SparkJobConfig(
             output_dir=executor_output_path,
@@ -93,8 +102,8 @@ class DistributedJarExecutor:
         # Pass the dictionary to create_run_jar_map_func
         jar_runner = SparkJobRunner(config_instance)
         run_jar_command = jar_runner.create_run_jar_map_func()
-        self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
-
+        app_statuses = self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
+        self._write_failed_app_statuses_to_hdfs(app_statuses, executor_output_path)
         result_combiner = ResultCombiner(jar_output_folder=self._get_jar_output_path(),
                                          executor_output_dir=executor_output_path,
                                          hdfs_fs=self.hdfs_manager.get_fs())
@@ -103,10 +112,12 @@ class DistributedJarExecutor:
         self._cleanup()
 
     # Define getters for the output paths
+    def _get_local_cache_dir(self) -> str:
+        return self.props.get_value('cacheDir')
 
-    def _get_executor_output_path(self) -> str:
+    def _get_hdfs_executor_output_path(self) -> str:
         output_folder_name = os.path.basename(self.submission_cmd.output_folder)
-        cache_dir = self.props.get_value('cacheDir')
+        cache_dir = self._get_local_cache_dir()
         executor_output_dir_name = self.props.get_value('executorOutputDirName')
         executor_output_path_raw = os.path.join(cache_dir, output_folder_name, executor_output_dir_name)
         return f'{self.hdfs_manager.get_scheme()}:///{executor_output_path_raw.strip("/")}'
@@ -127,6 +138,19 @@ class DistributedJarExecutor:
             return self.hdfs_manager
         raise ValueError(f'Unsupported scheme: {scheme}')
 
+    def _write_failed_app_statuses_to_hdfs(self, app_statuses: List[AppStatusResult], executor_output_path: str):
+        jar_output_dir_name = self.props.get_value('jarOutputDirName')
+        for app_status in app_statuses:
+            if app_status.status == AppStatus.FAILURE:
+                file_name = os.path.basename(app_status.path)
+                jar_output_dir = os.path.join(executor_output_path, file_name, jar_output_dir_name)
+                self._write_to_csv(app_status, jar_output_dir, self.hdfs_manager.get_fs())
+
+    def _write_to_csv(self, app_status: AppStatusResult, jar_output_path: str, output_fs: fs.FileSystem) -> None:
+        status_csv_file_name = self.props.get_value('statusCsvFileName')
+        status_csv_file_path = os.path.join(jar_output_path, status_csv_file_name)
+        with output_fs.open_output_stream(status_csv_file_path) as f:
+            pd.DataFrame([app_status.to_dict()]).to_csv(f, index=False)
 
     def _cleanup(self):
         pass

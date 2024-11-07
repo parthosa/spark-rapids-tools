@@ -24,6 +24,7 @@ from typing import Callable, List, Tuple
 from pyspark import SparkContext, RDD
 from pyspark.sql import SparkSession
 
+from distributed.status_reporter import AppStatusResult
 from spark_rapids_tools.tools.distributed.utils import Utilities
 
 
@@ -34,6 +35,7 @@ class SparkJobManager:
     dependencies_paths: List[str]
     jvm_log_file: str
     log_file_path: str
+    cache_dir: str
     _spark_context: SparkContext = field(default=None, init=False)
 
     def __post_init__(self):
@@ -113,10 +115,10 @@ class SparkJobManager:
         self._set_spark_context(spark.sparkContext)
         self._set_env()
 
-    @staticmethod
-    def _get_python_dependencies() -> List[str]:
-        folder_path = str(Utilities.get_project_root() / 'src' / 'distributed')
-        zip_path = Utilities.zip_folder(folder_path)
+    def _get_python_dependencies(self) -> List[str]:
+        folder_path = os.path.join(Utilities.get_project_root(), 'src', 'distributed')
+        dest_zip_path = os.path.join(self.cache_dir, 'distributed.zip')
+        zip_path = Utilities.zip_folder(folder_path, dest_zip_path)
         return [zip_path]
 
     def _add_files_to_spark_context(self):
@@ -157,13 +159,13 @@ class SparkJobManager:
             logging.error('Failed to write to log file %s. Error: %s', log_file_path, e)
             raise
 
-    def submit_map_job(self, map_func: Callable, input_list: list) -> list:
+    def submit_map_job(self, map_func: Callable, input_list: list) -> List[AppStatusResult]:
         input_list_rdd = self._convert_input_to_rdd(input_list)
         try:
             map_fn_result, total_time = self._run_map_job(map_func, input_list_rdd)
-            logs_arr_list, result = zip(*map_fn_result)
+            logs_arr_list, app_statuses = zip(*map_fn_result)
             self._write_output(self.log_file_path, logs_arr_list, total_time)
-            return list(result)
+            return list(app_statuses)
         except Exception as e:
             logging.error('Error during map job submission: %s', e)
             raise

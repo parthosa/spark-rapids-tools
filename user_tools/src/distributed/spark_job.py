@@ -28,6 +28,8 @@ from distributed.status_reporter import AppStatus, AppStatusResult
 
 @dataclass
 class SparkJobConfig:
+    """ Configuration for a Spark job. """
+
     output_dir: str
     dependencies_paths: List[str]
     hadoop_classpath: str
@@ -36,8 +38,11 @@ class SparkJobConfig:
     jar_main_class: str
     rapids_args: List[str]
 
+
 @dataclass
 class SparkJobRunner:
+    """ Class to run a JAR file in a Spark job. """
+
     config: SparkJobConfig = field(init=True)
 
     def create_run_jar_map_func(self):
@@ -57,7 +62,7 @@ class SparkJobRunner:
             # if app_status.status == AppStatus.FAILURE:
             #     app_status.write_to_csv(executor_output_dir, self.hdfs_manager.get_fs())
             logs.extend(exec_logs)
-            return logs, executor_output_dir
+            return logs, app_status
 
         return run_jar_map_func
 
@@ -81,7 +86,8 @@ class SparkJobRunner:
 
         tool_args = ['--output-directory', executor_output_dir, file_path]
 
-        return [java_exec] + self.config.jvm_args + ['-cp', jars, self.config.jar_main_class] + self.config.rapids_args + tool_args
+        return ([java_exec] + self.config.jvm_args + ['-cp', jars, self.config.jar_main_class]
+                + self.config.rapids_args + tool_args)
 
     @staticmethod
     def _submit_jar_cmd(jar_command: List[str]) -> Tuple[List[str], AppStatusResult]:

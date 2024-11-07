@@ -13,13 +13,9 @@
 # limitations under the License.
 
 """ Module for reporting the status of applications. """
-
-import os
-
-import pandas as pd
-from pyarrow import fs
-
+from dataclasses import dataclass
 from enum import Enum
+
 
 class AppStatus(Enum):
     """ Enumerated type for the status of an application. """
@@ -30,6 +26,7 @@ class AppStatus(Enum):
     UNKNOWN = 'UNKNOWN'
 
 
+@dataclass
 class AppStatusResult:
     """ Class for storing the status of an application. """
 
@@ -37,7 +34,6 @@ class AppStatusResult:
     STATUS = 'Status'
     APP_ID = 'AppID'
     DESCRIPTION = 'Description'
-    STATUS_CSV_FILE_NAME = 'rapids_4_spark_qualification_output_status.csv'
 
     def __init__(self, path: str, status: AppStatus, app_id: str = 'N/A', message: str = '') -> None:
         self.path: str = path
@@ -55,16 +51,3 @@ class AppStatusResult:
             self.APP_ID: self.app_id,
             self.DESCRIPTION: self.message
         }
-
-    def write_to_csv(self, jar_output_dir: str, output_fs: fs.FileSystem) -> None:
-        """
-        Write a list of application status results to a CSV file using Pandas.
-
-        :param jar_output_dir: The directory to write the CSV file to.
-        :param output_fs: The filesystem to write the CSV file to.
-        """
-        output_fs.create_dir(jar_output_dir)
-        status_csv_file_path = os.path.join(jar_output_dir, self.STATUS_CSV_FILE_NAME)
-        # Write the status to a CSV file
-        with output_fs.open_output_stream(status_csv_file_path) as f:
-            pd.DataFrame([self.to_dict()]).to_csv(f, index=False)

@@ -17,7 +17,6 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from pyarrow import fs
 
@@ -83,7 +82,7 @@ class Utilities:
             return False
 
     @staticmethod
-    def zip_folder(source_folder: str, dest_zip_path: Optional[str] = None) -> str:
+    def zip_folder(source_folder: str, dest_zip_path: str) -> str:
         """
         Zips the specified folder, keeping the folder at the top level in the zip file.
 
@@ -91,10 +90,10 @@ class Utilities:
         :param dest_zip_path: Full path for the resulting zip file (should end with .zip).
         :return: Path to the zipped file.
         """
-        if dest_zip_path is None:
-            dest_zip_path = f'{source_folder}.zip'
-        else:
-            assert dest_zip_path.endswith('.zip'), 'dest_zip_path should end with .zip'
+        assert dest_zip_path.endswith('.zip'), 'dest_zip_path should end with .zip'
+
+        if os.path.exists(dest_zip_path):
+            os.remove(dest_zip_path)
 
         # Create the zip file with the folder at the top level
         shutil.make_archive(dest_zip_path.rstrip('.zip'), 'zip',
@@ -103,12 +102,12 @@ class Utilities:
         return dest_zip_path
 
     @staticmethod
-    def get_project_root() -> Path:
+    def get_project_root() -> str:
         """
         Returns the path to the root of the project by locating the 'pyproject.toml' file.
         """
         current_dir = Path(__file__).resolve()
         for parent in current_dir.parents:
             if (parent / 'pyproject.toml').exists():
-                return parent
+                return parent.as_posix()
         raise FileNotFoundError("Project root not found. Ensure there's a 'pyproject.toml' file in the root directory.")
