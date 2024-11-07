@@ -113,9 +113,17 @@ class SparkJobManager:
         self._set_spark_context(spark.sparkContext)
         self._set_env()
 
+    @staticmethod
+    def _get_python_dependencies() -> List[str]:
+        folder_path = str(Utilities.get_project_root() / 'src' / 'distributed')
+        zip_path = Utilities.zip_folder(folder_path)
+        return [zip_path]
+
     def _add_files_to_spark_context(self):
         for dep_path in self.dependencies_paths:
             self._get_spark_context().addFile(dep_path)
+        for dep_path in self._get_python_dependencies():
+            self._get_spark_context().addPyFile(dep_path)
         self._get_spark_context().addFile(self.jvm_log_file)
 
     @staticmethod

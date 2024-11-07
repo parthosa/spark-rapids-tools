@@ -17,13 +17,9 @@ Main module for distributed execution of JAR files on Spark.
 """
 
 import os
-import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import List, Tuple
+from typing import List
 from urllib.parse import urlparse
-
-from pyspark import SparkFiles
 
 from spark_rapids_pytools.common.prop_manager import YAMLPropertiesContainer
 from spark_rapids_pytools.common.utilities import Utils
@@ -31,8 +27,8 @@ from spark_rapids_pytools.rapids.tools_submission_cmd import ToolSubmissionComma
 from spark_rapids_tools.tools.distributed.hdfs_manager import HdfsManager, InputFsManager, LocalFsManager, FsManager
 from spark_rapids_tools.tools.distributed.result_combiner import ResultCombiner
 from spark_rapids_tools.tools.distributed.spark_job_manager import SparkJobManager
-from spark_rapids_tools.tools.distributed.status_reporter import AppStatusResult, AppStatus
-
+from distributed.status_reporter import AppStatusResult, AppStatus
+from distributed.spark_job import SparkJobConfig, SparkJobRunner
 
 @dataclass
 class DistributedJarExecutor:
@@ -83,7 +79,20 @@ class DistributedJarExecutor:
                                              self.submission_cmd.dependencies_paths,
                                              self.submission_cmd.jvm_log_file,
                                              self._get_log_file_path())
-        run_jar_command = self._create_run_jar_map_func(executor_output_path)
+        # Define the dictionary with arguments
+        config_instance = SparkJobConfig(
+            output_dir=executor_output_path,
+            dependencies_paths=self.submission_cmd.dependencies_paths,
+            hadoop_classpath=self.submission_cmd.hadoop_classpath,
+            jvm_log_file=self.submission_cmd.jvm_log_file,
+            jvm_args=self.submission_cmd.jvm_args,
+            jar_main_class=self.submission_cmd.jar_main_class,
+            rapids_args=self.rapids_args
+        )
+
+        # Pass the dictionary to create_run_jar_map_func
+        jar_runner = SparkJobRunner(config_instance)
+        run_jar_command = jar_runner.create_run_jar_map_func()
         self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
 
         result_combiner = ResultCombiner(jar_output_folder=self._get_jar_output_path(),
@@ -118,87 +127,6 @@ class DistributedJarExecutor:
             return self.hdfs_manager
         raise ValueError(f'Unsupported scheme: {scheme}')
 
-    def _create_run_jar_map_func(self, hdfs_base_dir: str):
-        def run_jar_map_func(file_path: str):
-            logs = [f'Processing {file_path}']
-
-            # Generate unique executor output directory
-            executor_output_dir = os.path.join(hdfs_base_dir, os.path.basename(file_path))
-            logs.append(f'Executor output directory: {executor_output_dir}')
-
-            # Run the JAR command
-            jar_command = self._get_jar_command(file_path, executor_output_dir)
-            exec_logs, app_status = self._submit_jar_cmd(jar_command)
-            logs.extend(exec_logs)
-            if app_status.status == AppStatus.FAILURE:
-                app_status.write_to_csv(executor_output_dir, self.hdfs_manager.get_fs())
-            return logs, executor_output_dir
-
-        return run_jar_map_func
-
-    def _get_jar_command(self, file_path: str, executor_output_dir: str) -> List[str]:
-        local_deps_path = [SparkFiles.get(os.path.basename(dep)) for dep in self.submission_cmd.dependencies_paths]
-        local_deps_path.append(self.submission_cmd.hadoop_classpath)
-        local_deps_path.append(f'{os.getenv("SPARK_HOME")}/jars/*')
-        jars = ':'.join(local_deps_path)
-
-        java_exec = f'{os.environ["JAVA_HOME"]}/bin/java'
-        local_jvm_log_file = SparkFiles.get(os.path.basename(self.submission_cmd.jvm_log_file))
-
-        # Update JVM log configuration
-        jvm_log_file_index = next(
-            i for i, arg in enumerate(self.submission_cmd.jvm_args) if '-Dlog4j.configuration' in arg)
-        self.submission_cmd.jvm_args[jvm_log_file_index] = f'-Dlog4j.configuration=file:{local_jvm_log_file}'
-
-        tool_args = ['--output-directory', executor_output_dir, file_path]
-
-        return [java_exec] + self.submission_cmd.jvm_args + ['-cp', jars, self.submission_cmd.jar_main_class] \
-            + self.rapids_args + tool_args
-
-    @staticmethod
-    def _submit_jar_cmd(jar_command: List[str]) -> Tuple[List[str], AppStatusResult]:
-        """
-        Executes a JAR command and captures its status, output, and execution time.
-
-        :param jar_command: The JAR command to execute.
-        :return: A tuple containing the logs generated during the execution and the status of the application.
-        """
-        logs = []
-        start_time = datetime.now()
-        command_str = ' '.join(jar_command)
-
-        logs.append(f'Starting execution of command: {command_str}')
-        try:
-            result = subprocess.run(jar_command, check=True, capture_output=True, text=True)
-            logs.append('Command succeeded.')
-
-            if result.stdout:
-                logs.append(f'stdout:\n{result.stdout}')
-            if result.stderr:
-                logs.append(f'stderr:\n{result.stderr}')
-
-            app_status = AppStatusResult(path=jar_command[-1],
-                                         status=AppStatus.SUCCESS if result.returncode == 0 else AppStatus.FAILURE,
-                                         message=result.stderr if result.returncode != 0 else '')
-        except subprocess.CalledProcessError as ex:
-            logs.append(f'Command failed with exit code {ex.returncode}.')
-            if ex.stdout:
-                logs.append(f'stdout:\n{ex.stdout}')
-            if ex.stderr:
-                logs.append(f'stderr:\n{ex.stderr}')
-            app_status = AppStatusResult(path=jar_command[-1], status=AppStatus.FAILURE,
-                                         message=ex.stderr or 'Error during command execution.')
-        except Exception as ex:  # pylint: disable=broad-except
-            logs.append(f'Unexpected error: {ex}')
-            app_status = AppStatusResult(path=jar_command[-1], status=AppStatus.FAILURE,
-                                         message=str(ex))
-
-        finally:
-            processing_time = datetime.now() - start_time
-            logs.append(f'Total processing time: {processing_time}')
-
-        return logs, app_status
 
     def _cleanup(self):
-        if self.spark_manager:
-            self.spark_manager.cleanup()
+        pass

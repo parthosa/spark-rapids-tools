@@ -19,10 +19,9 @@ import os
 import pandas as pd
 from pyarrow import fs
 
-from spark_rapids_tools import EnumeratedType
+from enum import Enum
 
-
-class AppStatus(EnumeratedType):
+class AppStatus(Enum):
     """ Enumerated type for the status of an application. """
 
     SUCCESS = 'SUCCESS'

@@ -13,8 +13,11 @@
 # limitations under the License.
 
 """ Utility functions for distributed tools """
-
+import os
+import shutil
 import subprocess
+from pathlib import Path
+from typing import Optional
 
 from pyarrow import fs
 
@@ -78,3 +81,34 @@ class Utilities:
             return file_info.type in {fs.FileType.File, fs.FileType.Directory}
         except FileNotFoundError:
             return False
+
+    @staticmethod
+    def zip_folder(source_folder: str, dest_zip_path: Optional[str] = None) -> str:
+        """
+        Zips the specified folder, keeping the folder at the top level in the zip file.
+
+        :param source_folder: Path to the folder to be zipped.
+        :param dest_zip_path: Full path for the resulting zip file (should end with .zip).
+        :return: Path to the zipped file.
+        """
+        if dest_zip_path is None:
+            dest_zip_path = f'{source_folder}.zip'
+        else:
+            assert dest_zip_path.endswith('.zip'), 'dest_zip_path should end with .zip'
+
+        # Create the zip file with the folder at the top level
+        shutil.make_archive(dest_zip_path.rstrip('.zip'), 'zip',
+                            root_dir=os.path.dirname(source_folder),
+                            base_dir=os.path.basename(source_folder))
+        return dest_zip_path
+
+    @staticmethod
+    def get_project_root() -> Path:
+        """
+        Returns the path to the root of the project by locating the 'pyproject.toml' file.
+        """
+        current_dir = Path(__file__).resolve()
+        for parent in current_dir.parents:
+            if (parent / 'pyproject.toml').exists():
+                return parent
+        raise FileNotFoundError("Project root not found. Ensure there's a 'pyproject.toml' file in the root directory.")
