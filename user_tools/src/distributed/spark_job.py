@@ -17,6 +17,7 @@ These functions will be executed by the workers in the cluster.
 """
 
 import os
+import socket
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -50,7 +51,8 @@ class SparkJobRunner:
         Creates a function to be used as a map function for running JAR files.
         """
         def run_jar_map_func(file_path: str):
-            logs = [f'Processing {file_path}']
+            hostname = socket.gethostname()
+            logs = [f'Host: {hostname}, Processing file: {file_path}']
 
             # Generate unique executor output directory
             executor_output_dir = os.path.join(self.config.output_dir, os.path.basename(file_path))
