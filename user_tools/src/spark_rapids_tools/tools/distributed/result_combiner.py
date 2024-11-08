@@ -129,12 +129,13 @@ class RawMetricsProcessor(FileProcessor):
     """ Class to process raw metrics folder. """
 
     def process(self):
-        raw_metrics_path = os.path.join(self.inner_directory.path, 'raw_metrics')
+        raw_metrics_src_path = os.path.join(self.inner_directory.path, 'raw_metrics')
+        raw_metrics_dest_path = os.path.join(self.jar_output_folder, 'raw_metrics')
         # Copy the raw metrics directory to the combined output path using pyarrow.fs.copy_files()
         # check if the raw_metrics directory exists using pyarrow
-        if Utilities.resource_exists(raw_metrics_path, self.hdfs_fs):
-            fs.copy_files(source=raw_metrics_path,
-                          destination=self.jar_output_folder,
+        if Utilities.resource_exists(raw_metrics_src_path, self.hdfs_fs):
+            fs.copy_files(source=raw_metrics_src_path,
+                          destination=raw_metrics_dest_path,
                           source_filesystem=self.hdfs_fs)
 
 
