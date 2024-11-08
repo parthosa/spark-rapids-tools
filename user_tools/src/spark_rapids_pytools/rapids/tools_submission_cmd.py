@@ -13,7 +13,8 @@
 # limitations under the License.
 
 """ ToolSubmissionCommand class definition """
-
+import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import List
@@ -43,7 +44,12 @@ class ToolSubmissionCommand:
                 self.jvm_log_file = arg.split('=')[1]
         exclusion_regex = r'(spark-\d+\.\d+\.\d+-bin-hadoop\d+|/[^/]*hadoop[^/]*)'  # Filter out spark and hadoop jars
         classpath_arr_list = self.classpath_arr[1].split(':')
-        self.dependencies_paths = [path for path in classpath_arr_list if not re.search(exclusion_regex, path)]
+        self.dependencies_paths = []
+        for path in classpath_arr_list:
+            file_name = os.path.basename(path)
+            if not (re.search(exclusion_regex, file_name) or os.path.isdir(path) or file_name == '*'):
+                self.dependencies_paths.append(path)
+        logging.info('Filtered dependencies paths: %s', list(self.dependencies_paths))
 
     def build_cmd_local(self) -> List[str]:
         """

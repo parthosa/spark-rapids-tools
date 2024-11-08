@@ -44,7 +44,34 @@ class SparkJobConfig:
 class SparkJobRunner:
     """ Class to run a JAR file in a Spark job. """
 
+    platform: str = field(init=True)
     config: SparkJobConfig = field(init=True)
+    platform_env_vars_map: dict = field(init=False)
+
+    def __post_init__(self):
+        # TODO: Add support for other platforms
+        self.platform_env_vars_map = {
+            'emr': {
+                'SPARK_HOME': '/usr/lib/spark',
+                'JAVA_HOME': '/etc/alternatives/jre',
+                'HADOOP_HOME': '/usr/lib/hadoop'
+            },
+            'dataproc': {
+                'SPARK_HOME': '/usr/lib/spark',
+                'JAVA_HOME': '/usr/lib/jvm/temurin-11-jdk-amd64',
+                'HADOOP_HOME': '/usr/lib/hadoop'
+            }
+        }
+
+    def get_env_var(self, key: str) -> str:
+        """
+        Get the environment variable value based on the platform and key.
+        """
+
+        env_var = os.getenv(key)
+        if env_var is None:
+            env_var = self.platform_env_vars_map.get(self.platform).get(key)
+        return env_var
 
     def create_run_jar_map_func(self):
         """
@@ -74,10 +101,10 @@ class SparkJobRunner:
         """
         local_deps_path = [SparkFiles.get(os.path.basename(dep)) for dep in self.config.dependencies_paths]
         local_deps_path.append(self.config.hadoop_classpath)
-        local_deps_path.append(f'{os.getenv("SPARK_HOME")}/jars/*')
+        local_deps_path.append(f'{self.get_env_var("SPARK_HOME")}/jars/*')
         jars = ':'.join(local_deps_path)
 
-        java_exec = f'{os.environ["JAVA_HOME"]}/bin/java'
+        java_exec = f'{self.get_env_var("JAVA_HOME")}/bin/java'
         local_jvm_log_file = SparkFiles.get(os.path.basename(self.config.jvm_log_file))
 
         # Update JVM log configuration

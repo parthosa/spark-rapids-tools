@@ -41,6 +41,7 @@ class DistributedJarExecutor:
     Class to orchestrate the execution of the Tools JAR on Spark.
     """
     spark_config_file: str = field(init=True)
+    platform: str = field(init=True)
     submission_cmd: ToolSubmissionCommand = field(init=True)
     hdfs_manager: HdfsManager = field(init=False)
     local_fs_manager: LocalFsManager = field(init=False)
@@ -55,6 +56,11 @@ class DistributedJarExecutor:
         assert os.getenv('SPARK_HOME') is not None, 'SPARK_HOME environment variable is not set.'
         assert os.getenv('HADOOP_HOME') is not None, 'HADOOP_HOME environment variable is not set.'
         assert os.getenv('JAVA_HOME') is not None, 'JAVA_HOME environment variable is not set.'
+        assert os.getenv('PYTHONPATH') is not None, ('PYTHONPATH environment variable is not set. '
+                                                     'Include \'$SPARK_HOME/python\' in PYTHONPATH.')
+        assert os.getenv('SPARK_HOME') in os.getenv('PYTHONPATH'), ('SPARK_HOME is not in PYTHONPATH. '
+                                                                    'Include \'$SPARK_HOME/python\' in PYTHONPATH.')
+
         self.rapids_args = self.submission_cmd.extra_rapids_args[:-1]
         self.event_logs_path = self.submission_cmd.extra_rapids_args[-1]
         config_path = Utils.resource_path(f'{self.name}-conf.yaml')
@@ -100,7 +106,7 @@ class DistributedJarExecutor:
         )
 
         # Pass the dictionary to create_run_jar_map_func
-        jar_runner = SparkJobRunner(config_instance)
+        jar_runner = SparkJobRunner(platform=self.platform, config=config_instance)
         run_jar_command = jar_runner.create_run_jar_map_func()
         app_statuses = self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
         self._write_failed_app_statuses_to_hdfs(app_statuses, executor_output_path)

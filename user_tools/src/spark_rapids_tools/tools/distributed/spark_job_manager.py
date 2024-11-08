@@ -56,6 +56,11 @@ class SparkJobManager:
     def _check_spark_submit_availability():
         check_command = ['spark-submit', '--version']
         Utilities.check_cmd_availability('spark-submit', check_command)
+        # Add Spark Python path to PYTHONPATH
+        os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, [
+            f"{os.environ['SPARK_HOME']}/python",
+            os.environ.get('PYTHONPATH', '')
+        ]))
 
     def _parse_spark_conf(self) -> dict:
         spark_conf = {}
@@ -111,12 +116,13 @@ class SparkJobManager:
         for key, value in spark_confs.items():
             spark_builder.config(key, value)
         spark_builder.config('spark.submit.deployMode', 'client')
+        spark_builder.config('spark.executorEnv.PYTHONPATH', os.environ['PYTHONPATH'])
         spark = spark_builder.getOrCreate()
         self._set_spark_context(spark.sparkContext)
         self._set_env()
 
     def _get_python_dependencies(self) -> List[str]:
-        folder_path = os.path.join(Utilities.get_project_root(), 'src', 'distributed')
+        folder_path = os.path.join(Utilities.get_project_root(), 'distributed')
         dest_zip_path = os.path.join(self.cache_dir, 'distributed.zip')
         zip_path = Utilities.zip_folder(folder_path, dest_zip_path)
         return [zip_path]

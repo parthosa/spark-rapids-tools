@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """ Utility functions for distributed tools """
+import logging
 import os
 import shutil
 import subprocess
@@ -30,7 +31,7 @@ class Utilities:
         try:
             res = subprocess.run(command, check=True, capture_output=True, text=True)
             if description:
-                print(f'SUCCESS: {description or " ".join(command)}')
+                logging.info('CMD: %s; Status: SUCCESS', description)
             return res
         except subprocess.CalledProcessError as e:
             if description:
@@ -108,6 +109,13 @@ class Utilities:
         """
         current_dir = Path(__file__).resolve()
         for parent in current_dir.parents:
+            # Check if 'pyproject.toml' exists in the parent directory
             if (parent / 'pyproject.toml').exists():
+                return (parent / 'src').as_posix()
+
+            # Check if any directory ends with '.dist-info'
+            if any(f.name.endswith('.dist-info') and f.is_dir() for f in parent.iterdir()):
                 return parent.as_posix()
-        raise FileNotFoundError("Project root not found. Ensure there's a 'pyproject.toml' file in the root directory.")
+
+        # If neither file was found, raise an error
+        raise FileNotFoundError("Could not locate the project root directory.")

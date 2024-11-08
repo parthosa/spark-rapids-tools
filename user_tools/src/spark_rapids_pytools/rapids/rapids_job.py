@@ -259,5 +259,5 @@ class RapidsLocalJob(RapidsJob):
 
     def _submit_job_distributed(self, submission_cmd: ToolSubmissionCommand) -> None:
         spark_config_file = self.exec_ctxt.get_ctxt('distributedModeArgs').get('sparkConfigFile')
-        executor = DistributedJarExecutor(spark_config_file, submission_cmd)
+        executor = DistributedJarExecutor(spark_config_file, self.exec_ctxt.platform.get_platform_name(), submission_cmd)
         executor.run_as_spark_app()

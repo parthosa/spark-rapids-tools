@@ -48,8 +48,12 @@ class HdfsManager(FsManager):
         assert os.getenv('HADOOP_HOME') is not None, 'HADOOP_HOME environment variable is not set'
         # Set the CLASSPATH environment variable. This is required by pyarrow to access HDFS.
         try:
-            result = self._run_hdfs_command(['classpath', '--glob'], 'Setting CLASSPATH')
-            os.environ['CLASSPATH'] = result.stdout.strip()
+            result = self._run_hdfs_command(['classpath', '--glob'], 'Setting Hadoop classpath')
+            hadoop_classpath = result.stdout.strip()
+            os.environ['CLASSPATH'] = os.pathsep.join(filter(None, [
+                os.environ.get('CLASSPATH', ''),
+                hadoop_classpath
+            ]))
         except subprocess.CalledProcessError as e:
             raise RuntimeError('Error retrieving Hadoop classpath') from e
         self._base_fs = fs.HadoopFileSystem('default')
