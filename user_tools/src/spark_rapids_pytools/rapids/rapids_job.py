@@ -137,9 +137,6 @@ class RapidsJob:
         self.logger.info('Running the Rapids Job...')
         try:
             job_output = self._submit_job_distributed(submission_cmd)
-            if not ToolLogging.is_debug_mode_enabled():
-                # we check the debug level because we do not want the output displayed twice.
-                self._print_job_output(job_output)
         finally:
             self._cleanup_temp_log4j_files()
         return job_output
