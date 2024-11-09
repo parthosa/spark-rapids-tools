@@ -23,6 +23,7 @@ import textwrap
 import urllib
 import xml.etree.ElementTree as elem_tree
 from functools import reduce
+from io import BytesIO
 from operator import getitem
 from typing import Any, Optional, ClassVar
 
@@ -31,6 +32,7 @@ import fire
 import pandas as pd
 import psutil
 from packaging.version import Version
+from pyarrow import fs
 from pydantic import ValidationError, AnyHttpUrl, TypeAdapter
 
 import spark_rapids_pytools
@@ -349,3 +351,23 @@ class Utilities:
             num_bytes /= 1024.0
             i += 1
         return f'{num_bytes:.2f} {size_units[i]}'
+
+    @classmethod
+    def read_csv(cls, path, hdfs_fs: Optional[fs.FileSystem] = None):
+        if hdfs_fs:
+            return cls.read_csv_from_hdfs(hdfs_fs, path)
+        return pd.read_csv(path)
+
+    @staticmethod
+    def read_csv_from_hdfs(hdfs_fs: fs.FileSystem, file_path: str) -> pd.DataFrame:
+        # Open the file on HDFS as an input stream using the existing hdfs_fs
+        try:
+            # Try to open the file on HDFS
+            with hdfs_fs.open_input_file(file_path) as input_stream:
+                # Read the input stream into a pandas DataFrame
+                df = pd.read_csv(BytesIO(input_stream.read()))
+            return df
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Error: The file '{file_path}' does not exist on HDFS.")
+        except fs.ArrowIOError as e:
+            raise fs.ArrowIOError(f"IOError while trying to read the file '{file_path}': {e}")

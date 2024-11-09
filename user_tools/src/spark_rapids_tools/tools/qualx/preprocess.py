@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """ Utility functions for preprocessing for QualX """
-
+import io
 from itertools import chain
 from pathlib import Path
 from typing import Any, List, Mapping, Optional, Tuple, Dict
@@ -22,6 +22,8 @@ import glob
 import os
 import numpy as np
 import pandas as pd
+from pyarrow import fs
+
 from spark_rapids_tools.tools.qualx.util import (
     ensure_directory,
     find_eventlogs,
@@ -251,6 +253,100 @@ def load_datasets(
 
     return all_datasets, profile_df
 
+def load_profiles_internal(profile_paths, app_meta, ds_name, scale_factor_meta=None):
+    toc_list = []
+    for path in profile_paths:
+        for app_id in app_meta.keys():
+            if app_id == 'default':
+                csv_files = glob.glob(f'{path}/**/*.csv', recursive=True)
+            else:
+                csv_files = glob.glob(f'{path}/**/{app_id}/*.csv', recursive=True)
+            if csv_files:
+                tmp = pd.DataFrame({'filepath': csv_files})
+                fp_split = tmp['filepath'].str.split(r'/')
+                tmp['test_name'] = ds_name
+                tmp['appId'] = fp_split.str[-2]
+                tmp['table_name'] = fp_split.str[-1].str[:-4]
+                tmp['runType'] = (
+                    app_meta[app_id]['runType']
+                    if app_id in app_meta
+                    else app_meta['default']['runType']
+                )
+                if not scale_factor_meta:
+                    tmp['scaleFactor'] = (
+                        app_meta[app_id]['scaleFactor']
+                        if app_id in app_meta
+                        else app_meta['default']['scaleFactor']
+                    )
+                toc_list.append(tmp)
+
+    return toc_list
+
+
+# Assuming hdfs_fs is already initialized
+# hdfs_fs = fs.HadoopFileSystem('hdfs://your_hdfs_url')
+
+def get_csv_files_from_hdfs(path: str, app_id: str, hdfs_fs: fs.FileSystem) -> List[str]:
+    """
+    Get list of CSV files from HDFS for a given app_id and path.
+
+    Parameters:
+    - path: Base path on HDFS to start searching from.
+    - app_id: Application ID to filter the search.
+    - hdfs_fs: HDFS filesystem object.
+
+    Returns:
+    - List of file paths (as strings) that match the search criteria.
+    """
+    # Create a FileSelector to list files recursively from the path
+    selector = fs.FileSelector(path, recursive=True)
+    file_info = hdfs_fs.get_file_info(selector)
+
+    # Filter files based on app_id if specified
+    if app_id == 'default':
+        csv_files = [info.path for info in file_info if info.path.endswith('.csv')]
+    else:
+        # Filter for files within the specific app_id subdirectory
+        csv_files = [
+            info.path for info in file_info if info.path.endswith('.csv') and f'/{app_id}/' in info.path
+        ]
+
+    return csv_files
+
+
+def load_profiles_internal_hdfs(profile_paths, app_meta, ds_name, scale_factor_meta, hdfs_fs: fs.FileSystem):
+    toc_list = []
+
+    # Loop over profile paths and app metadata
+    for path in profile_paths:
+        for app_id in app_meta.keys():
+            if app_id == 'default':
+                # Get CSV files for 'default' app_id
+                csv_files = get_csv_files_from_hdfs(path, 'default', hdfs_fs)
+            else:
+                # Get CSV files for specific app_id
+                csv_files = get_csv_files_from_hdfs(path, app_id, hdfs_fs)
+
+            if csv_files:
+                tmp = pd.DataFrame({'filepath': csv_files})
+                fp_split = tmp['filepath'].str.split(r'/')
+                tmp['test_name'] = ds_name
+                tmp['appId'] = fp_split.str[-2]
+                tmp['table_name'] = fp_split.str[-1].str[:-4]
+                tmp['runType'] = (
+                    app_meta[app_id]['runType']
+                    if app_id in app_meta
+                    else app_meta['default']['runType']
+                )
+                if not scale_factor_meta:
+                    tmp['scaleFactor'] = (
+                        app_meta[app_id]['scaleFactor']
+                        if app_id in app_meta
+                        else app_meta['default']['scaleFactor']
+                    )
+                toc_list.append(tmp)
+
+    return toc_list
 
 def load_profiles(
     datasets: Mapping[str, Mapping],
@@ -258,6 +354,7 @@ def load_profiles(
     node_level_supp: Optional[pd.DataFrame] = None,
     qual_tool_filter: Optional[str] = None,
     qual_tool_output: Optional[pd.DataFrame] = None,
+    hdfs_fs: Optional[fs.FileSystem] = None,
 ) -> pd.DataFrame:
     """Load dataset profiler CSV files as a pd.DataFrame."""
 
@@ -282,7 +379,6 @@ def load_profiles(
     all_raw_features = []
     # get list of csv files from each profile
     for ds_name, ds_meta in datasets.items():
-        toc_list = []
         app_meta = ds_meta.get('app_meta', None)
         platform = ds_meta.get('platform', 'onprem')
         scale_factor_meta = ds_meta.get('scaleFactorFromSqlIDRank', None)
@@ -305,36 +401,15 @@ def load_profiles(
             profile_paths = [f'{profile_dir}/{ds_name}']
         else:
             profile_paths = glob.glob(f'{profile_dir}/{ds_name}/*')
-        for path in profile_paths:
-            for app_id in app_meta.keys():
-                if app_id == 'default':
-                    csv_files = glob.glob(f'{path}/**/*.csv', recursive=True)
-                else:
-                    csv_files = glob.glob(f'{path}/**/{app_id}/*.csv', recursive=True)
-                if csv_files:
-                    tmp = pd.DataFrame({'filepath': csv_files})
-                    fp_split = tmp['filepath'].str.split(r'/')
-                    tmp['test_name'] = ds_name
-                    tmp['appId'] = fp_split.str[-2]
-                    tmp['table_name'] = fp_split.str[-1].str[:-4]
-                    tmp['runType'] = (
-                        app_meta[app_id]['runType']
-                        if app_id in app_meta
-                        else app_meta['default']['runType']
-                    )
-                    if not scale_factor_meta:
-                        tmp['scaleFactor'] = (
-                            app_meta[app_id]['scaleFactor']
-                            if app_id in app_meta
-                            else app_meta['default']['scaleFactor']
-                        )
-                    toc_list.append(tmp)
-
+        if hdfs_fs:
+            toc_list = load_profiles_internal_hdfs(profile_paths, app_meta, ds_name, scale_factor_meta, hdfs_fs)
+        else:
+            toc_list = load_profiles_internal(profile_paths, app_meta, ds_name, scale_factor_meta)
         if not toc_list:
             raise ValueError(f'No CSV files found for: {ds_name}')
 
         toc = pd.concat(toc_list)
-        raw_features = extract_raw_features(toc, node_level_supp, qual_tool_filter, qual_tool_output)
+        raw_features = extract_raw_features(toc, node_level_supp, qual_tool_filter, qual_tool_output, hdfs_fs=hdfs_fs)
         if raw_features.empty:
             continue
         # add scaleFactor from toc or from sqlID ordering within queries grouped by query name and app
@@ -396,17 +471,35 @@ def load_profiles(
     return profile_df
 
 
+def read_csv_from_hdfs(file_path: str, hdfs_fs: fs.FileSystem) -> pd.DataFrame:
+    """
+    Read a CSV file from HDFS into a pandas DataFrame.
+
+    Parameters:
+    - file_path: The path to the CSV file on HDFS.
+    - hdfs_fs: HDFS filesystem object.
+
+    Returns:
+    - DataFrame containing the data from the CSV file.
+    """
+    with hdfs_fs.open(file_path, 'rb') as f:
+        # Read the file content as a bytes object
+        file_content = f.read()
+        # Use io.BytesIO to convert the bytes to a file-like object that pandas can read
+        return pd.read_csv(io.BytesIO(file_content))
+
 def extract_raw_features(
     toc: pd.DataFrame,
     node_level_supp: Optional[pd.DataFrame],
     qualtool_filter: Optional[str],
     qualtool_output: Optional[pd.DataFrame] = None,
+    hdfs_fs: Optional[fs.FileSystem] = None,
 ) -> pd.DataFrame:
     """Given a pandas dataframe of CSV files, extract raw features into a single dataframe keyed by (appId, sqlID)."""
     # read all tables per appId
     unique_app_ids = toc['appId'].unique()
     app_id_tables = [
-        load_csv_files(toc, app_id, node_level_supp, qualtool_filter, qualtool_output)
+        load_csv_files(toc, app_id, node_level_supp, qualtool_filter, qualtool_output, hdfs_fs)
         for app_id in unique_app_ids
     ]
 
@@ -754,12 +847,13 @@ def load_csv_files(
     node_level_supp: Optional[pd.DataFrame],
     qualtool_filter: Optional[str],
     qualtool_output: Optional[pd.DataFrame],
+    hdfs_fs: Optional[fs.FileSystem] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     Load profiler CSV files into memory.
     """
 
-    def scan_tbl(
+    def scan_tbl_local(
         tb_name: str, abort_on_error: bool = False, warn_on_error: bool = True
     ) -> pd.DataFrame:
         try:
@@ -774,6 +868,32 @@ def load_csv_files(
                 raise ScanTblError() from ex
             scan_result = pd.DataFrame()
         return scan_result
+
+    def scan_tbl_hdfs(
+            tb_name: str, abort_on_error: bool = False, warn_on_error: bool = True
+    ) -> pd.DataFrame:
+        try:
+            # Retrieve the file path for the specified table name
+            file_path = sgl_app[sgl_app['table_name'] == tb_name]['filepath'].iloc[0]
+
+            # Open and read the file from HDFS
+            with hdfs_fs.open_input_file(file_path) as file:
+                data = io.BytesIO(file.read())
+                scan_result = pd.read_csv(data, encoding_errors='replace')
+
+        except Exception as ex:  # pylint: disable=broad-except
+            if warn_on_error or abort_on_error:
+                logger.warning('Failed to load %s for %s.', tb_name, app_id)
+            if abort_on_error:
+                raise ScanTblError() from ex
+            scan_result = pd.DataFrame()
+
+        return scan_result
+
+    def scan_tbl(tb_name: str, abort_on_error: bool = False, warn_on_error: bool = True) -> pd.DataFrame:
+        if hdfs_fs:
+            return scan_tbl_hdfs(tb_name, abort_on_error, warn_on_error)
+        return scan_tbl_local(tb_name, abort_on_error, warn_on_error)
 
     # Merge summary tables within each appId:
     sgl_app = toc[toc['appId'] == app_id]
@@ -1111,6 +1231,39 @@ def load_csv_files(
     return out
 
 
+def load_qtool_execs_hdfs(qtool_execs: List[str], hdfs_fs: fs.HadoopFileSystem) -> Optional[pd.DataFrame]:
+    """
+    Load supported stage info from qtool output in a form that can be merged with profiler data
+    to aggregate features and durations only over supported stages.
+    """
+    node_level_supp = None
+
+    def _is_ignore_no_perf(action: str) -> bool:
+        return action == 'IgnoreNoPerf'
+
+    if qtool_execs:
+        # Reading CSV files from HDFS using pyarrow
+        exec_info = pd.concat([
+            pd.read_csv(hdfs_fs.open_input_stream(f)) for f in qtool_execs
+        ])
+
+        node_level_supp = exec_info.copy()
+        node_level_supp['Exec Is Supported'] = (
+                node_level_supp['Exec Is Supported']
+                | node_level_supp['Action'].apply(_is_ignore_no_perf)
+                | node_level_supp['Exec Name'].apply(
+            lambda x: x.startswith('WholeStageCodegen')
+        )
+        )
+        node_level_supp = (
+            node_level_supp[['App ID', 'SQL ID', 'SQL Node Id', 'Exec Is Supported']]
+            .groupby(['App ID', 'SQL ID', 'SQL Node Id'])
+            .agg('all')
+            .reset_index(level=[0, 1, 2])
+        )
+    return node_level_supp
+
+
 def load_qtool_execs(qtool_execs: List[str]) -> Optional[pd.DataFrame]:
     """
     Load supported stage info from qtool output in a form that can be merged with profiler data
@@ -1152,4 +1305,23 @@ def load_qual_csv(
         df = pd.concat([pd.read_csv(f) for f in qual_csv])
         if cols:
             df = df[cols]
+    return df
+
+def load_qual_csv_hdfs(
+        qual_dirs: List[str], hdfs_fs: fs.FileSystem, csv_filename: str,  cols: Optional[List[str]] = None
+) -> Optional[pd.DataFrame]:
+    # Construct the full HDFS paths for the CSV files
+    qual_csv = [os.path.join(q, csv_filename) for q in qual_dirs]
+
+    df = None
+    if qual_csv:
+        # Read CSV files from HDFS using pyarrow
+        df = pd.concat([
+            pd.read_csv(hdfs_fs.open_input_stream(f)) for f in qual_csv
+        ])
+
+        # If specific columns are provided, filter them
+        if cols:
+            df = df[cols]
+
     return df

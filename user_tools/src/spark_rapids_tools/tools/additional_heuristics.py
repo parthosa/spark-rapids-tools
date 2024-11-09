@@ -18,12 +18,14 @@ import os
 import re
 from dataclasses import dataclass, field
 from logging import Logger
+from typing import Optional
 
 import pandas as pd
+from pyarrow import fs
 
 from spark_rapids_pytools.common.prop_manager import JSONPropertiesContainer
 from spark_rapids_pytools.common.utilities import ToolLogging
-from spark_rapids_tools.tools.qualx.util import find_paths, RegexPattern
+from spark_rapids_tools.tools.qualx.util import find_paths, RegexPattern, find_paths_hdfs
 from spark_rapids_tools.utils import Utilities
 
 
@@ -36,13 +38,15 @@ class AdditionalHeuristics:
     props: JSONPropertiesContainer = field(default=None, init=False)
     tools_output_dir: str = field(default=None, init=False)
     output_file: str = field(default=None, init=False)
+    hdfs_fs: Optional[fs.FileSystem] = field(default=None, init=False)
     # Contains apps info needed for applying heuristics
     all_apps: pd.DataFrame = field(default=None, init=False)
 
-    def __init__(self, props: dict, tools_output_dir: str, output_file: str):
+    def __init__(self, props: dict, tools_output_dir: str, output_file: str, hdfs_fs: Optional[fs.FileSystem] = None):
         self.props = JSONPropertiesContainer(props, file_load=False)
         self.tools_output_dir = tools_output_dir
         self.output_file = output_file
+        self.hdfs_fs = hdfs_fs
         self.logger = ToolLogging.get_and_setup_logger(f'rapids.tools.{self.__class__.__name__}')
 
     def _get_all_heuristics_functions(self) -> list:
@@ -51,44 +55,97 @@ class AdditionalHeuristics:
         """
         return [self.heuristics_based_on_spills]
 
+    def is_metrics_path_empty(self, metrics_path: str, app_ids: list) -> bool:
+        if self.hdfs_fs is None:
+            return not os.listdir(metrics_path) or len(app_ids) == 0
+        # Check if the directory is empty using pyarrow
+        metrics_list = self.hdfs_fs.get_file_info(fs.FileSelector(metrics_path))
+        return not len(metrics_list) > 0 or len(app_ids) == 0
+
+    def _apply_heuristics_local(self, app_ids: list, metrics_path: str):
+        result_arr = []
+        for app_id in app_ids:
+            app_id_path = os.path.join(metrics_path, app_id)
+            # Apply a list of heuristics and determine if the application should be skipped.
+            should_skip_overall = False
+            reasons = []
+            for heuristic_func in self._get_all_heuristics_functions():
+                try:
+                    should_skip, reason = heuristic_func(app_id_path)
+                except Exception as e:  # pylint: disable=broad-except
+                    should_skip = False
+                    reason = f' Cannot apply heuristics for qualification. Reason - {type(e).__name__}:{e}.'
+                    # self.logger.error(reason)
+                should_skip_overall = should_skip_overall or should_skip
+                reasons.append(reason)
+            result_arr.append([app_id, should_skip_overall, ' '.join(reasons)])
+        return result_arr
+
+    def _apply_heuristics_hdfs(self, qual_metrics: list):
+        result_arr = []
+        for metric_dir in qual_metrics:
+            selector = fs.FileSelector(metric_dir, recursive=False)
+            subdir_list = self.hdfs_fs.get_file_info(selector)
+            app_id_path = subdir_list[0].path
+            app_id = os.path.basename(app_id_path)
+            # Apply a list of heuristics and determine if the application should be skipped.
+            should_skip_overall = False
+            reasons = []
+            for heuristic_func in self._get_all_heuristics_functions():
+                try:
+                    should_skip, reason = heuristic_func(app_id_path)
+                except Exception as e:  # pylint: disable=broad-except
+                    should_skip = False
+                    reason = f' Cannot apply heuristics for qualification. Reason - {type(e).__name__}:{e}.'
+                    # self.logger.error(reason)
+                should_skip_overall = should_skip_overall or should_skip
+                reasons.append(reason)
+            result_arr.append([app_id, should_skip_overall, ' '.join(reasons)])
+        return result_arr
+
     def _apply_heuristics(self, app_ids: list) -> pd.DataFrame:
         """
         Apply additional heuristics to applications to determine if they can be accelerated on GPU.
         """
-        qual_metrics = find_paths(
-            self.tools_output_dir,
-            RegexPattern.qual_tool_metrics.match,
-            return_directories=True,
-        )
+        qual_output_dir = os.path.dirname(self.tools_output_dir)
+        sub_folder = 'rapids_4_spark_qualification_output'
+        qual_output_dir_name = os.path.basename(qual_output_dir)
+        hdfs_cache_dir = '/var/tmp/spark_rapids_user_tools_distributed_cache'
+        hdfs_qual_output_dir = f'{hdfs_cache_dir}/{qual_output_dir_name}/executor_output'
+
+        selector = fs.FileSelector(hdfs_qual_output_dir, recursive=False)
+        subdir_list = self.hdfs_fs.get_file_info(selector)
+
+        qual_metrics = []
+
+        for subdir in subdir_list:
+            subdir_qual_path = os.path.join(subdir.path, sub_folder)
+            qual_metrics_raw = find_paths_hdfs(
+                subdir_qual_path,
+                self.hdfs_fs,
+                RegexPattern.qual_tool_metrics.match,
+                return_directories=True,
+            )
+            qual_metrics.extend(qual_metrics_raw)
+
         if len(qual_metrics) == 0:
             self.logger.warning('No metrics found in output directory: %s', self.tools_output_dir)
             return pd.DataFrame(columns=self.props.get_value('resultCols'))
 
-        if len(qual_metrics) > 1:
+        if len(qual_metrics) > 1 and not self.hdfs_fs:
             # We don't expect multiple metrics directories. Log a warning and use the first one.
             self.logger.warning('Unexpected multiple metrics directories found. Using the first one: %s',
                                 qual_metrics[0])
 
         metrics_path = qual_metrics[0]
         result_arr = []
-        if not os.listdir(metrics_path) or len(app_ids) == 0:
+        if self.is_metrics_path_empty(metrics_path, app_ids):
             self.logger.warning('Skipping empty metrics folder: %s', qual_metrics[0])
+        elif not self.hdfs_fs:
+            result_arr = self._apply_heuristics_local(app_ids, metrics_path)
         else:
-            for app_id in app_ids:
-                app_id_path = os.path.join(metrics_path, app_id)
-                # Apply a list of heuristics and determine if the application should be skipped.
-                should_skip_overall = False
-                reasons = []
-                for heuristic_func in self._get_all_heuristics_functions():
-                    try:
-                        should_skip, reason = heuristic_func(app_id_path)
-                    except Exception as e:  # pylint: disable=broad-except
-                        should_skip = False
-                        reason = f' Cannot apply heuristics for qualification. Reason - {type(e).__name__}:{e}.'
-                        self.logger.error(reason)
-                    should_skip_overall = should_skip_overall or should_skip
-                    reasons.append(reason)
-                result_arr.append([app_id, should_skip_overall, ' '.join(reasons)])
+            result_arr = self._apply_heuristics_hdfs(qual_metrics)
+
 
         return pd.DataFrame(result_arr, columns=self.props.get_value('resultCols'))
 
@@ -98,13 +155,15 @@ class AdditionalHeuristics:
         """
         # Load stage aggregation metrics (this contains spill information)
         stage_agg_metrics_file = self.props.get_value('spillBased', 'stageAggMetrics', 'fileName')
-        stage_agg_metrics = pd.read_csv(os.path.join(app_id_path, stage_agg_metrics_file))
+        stage_agg_metrics_path = os.path.join(app_id_path, stage_agg_metrics_file)
+        stage_agg_metrics = Utilities.read_csv(stage_agg_metrics_path, self.hdfs_fs)
         stage_agg_metrics = stage_agg_metrics[self.props.get_value('spillBased',
                                                                    'stageAggMetrics', 'columns')]
 
         # Load sql-to-stage information (this contains Exec names)
         sql_to_stage_info_file = self.props.get_value('spillBased', 'sqlToStageInfo', 'fileName')
-        sql_to_stage_info = pd.read_csv(os.path.join(app_id_path, sql_to_stage_info_file))
+        sql_to_stage_info_path = os.path.join(app_id_path, sql_to_stage_info_file)
+        sql_to_stage_info = Utilities.read_csv(sql_to_stage_info_path, self.hdfs_fs)
         sql_to_stage_info = sql_to_stage_info[self.props.get_value('spillBased',
                                                                    'sqlToStageInfo', 'columns')]
 
@@ -139,6 +198,8 @@ class AdditionalHeuristics:
             heuristics_df.drop(columns=['Reason'], inplace=True)
             all_apps = pd.merge(all_apps, heuristics_df, on=['App ID'], how='left')
         except Exception as e:  # pylint: disable=broad-except
+            import traceback
+            traceback.print_exc()
             self.logger.error('Error occurred while applying additional heuristics. '
                               'Reason - %s:%s', type(e).__name__, e)
         return all_apps

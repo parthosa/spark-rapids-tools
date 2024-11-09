@@ -15,12 +15,17 @@
 """Implementation class representing wrapper around the RAPIDS acceleration Qualification tool."""
 
 import json
+import os
 import re
+import sys
 from dataclasses import dataclass, field
+from io import BytesIO
 from typing import Any, List, Callable, Optional, Dict
 
 import numpy as np
 import pandas as pd
+from param import FileSelector
+from pyarrow import fs
 from tabulate import tabulate
 
 from spark_rapids_pytools.cloud_api.sp_types import ClusterBase
@@ -314,7 +319,8 @@ class Qualification(RapidsJarTool):
         heuristics_ob = AdditionalHeuristics(
             props=self.ctxt.get_value('local', 'output', 'additionalHeuristics'),
             tools_output_dir=self.ctxt.get_rapids_output_folder(),
-            output_file=output_files_info.get_value('intermediateOutput', 'files', 'heuristics', 'path'))
+            output_file=output_files_info.get_value('intermediateOutput', 'files', 'heuristics', 'path'),
+            hdfs_fs=self.hdfs_fs)
         apps_pruned_df = heuristics_ob.apply_heuristics(apps_pruned_df)
         speedup_category_ob = SpeedupCategory(self.ctxt.get_value('local', 'output', 'speedupCategories'))
         # Group the applications and recalculate metrics
@@ -362,6 +368,7 @@ class Qualification(RapidsJarTool):
         if not self._evaluate_rapids_jar_tool_output_exist():
             return
 
+        self.hdfs_fs = self.init_hdfs()
         df = self._read_qualification_output_file('summaryReport')
         # 1. Operations related to XGboost modelling
         if self.ctxt.get_ctxt('estimationModelArgs')['xgboostEnabled'] and not df.empty:
@@ -514,11 +521,15 @@ class Qualification(RapidsJarTool):
         # Execute the prediction model
         model_name = self.ctxt.platform.get_prediction_model_name()
         qual_output_dir = self.ctxt.get_local('outputFolder')
+        qual_output_dir_name = os.path.basename(qual_output_dir)
+        hdfs_cache_dir = '/var/tmp/spark_rapids_user_tools_distributed_cache'
+        hdfs_qual_output_dir = f'{hdfs_cache_dir}/{qual_output_dir_name}/executor_output'
         output_info = self.__build_prediction_output_files_info()
         try:
-            predictions_df = predict(platform=model_name, qual=qual_output_dir,
+            predictions_df = predict(platform=model_name, qual=hdfs_qual_output_dir,
                                      output_info=output_info,
-                                     model=estimation_model_args['customModelFile'])
+                                     model=estimation_model_args['customModelFile'],
+                                     hdfs_fs=self.hdfs_fs)
         except Exception as e:  # pylint: disable=broad-except
             predictions_df = pd.DataFrame()
             self.logger.error(
@@ -599,7 +610,21 @@ class Qualification(RapidsJarTool):
         report_file_name = self.ctxt.get_value('toolOutput', file_format_key, report_name_key, 'fileName')
         report_file_path = FSUtil.build_path(self.ctxt.get_rapids_output_folder(), report_file_name)
         try:
-            return pd.read_csv(report_file_path)
+            qual_output_dir = self.ctxt.get_local('outputFolder')
+            sub_folder = self.ctxt.get_value('toolOutput', 'subFolder')
+            qual_output_dir_name = os.path.basename(qual_output_dir)
+            hdfs_cache_dir = '/var/tmp/spark_rapids_user_tools_distributed_cache'
+            hdfs_qual_output_dir = f'{hdfs_cache_dir}/{qual_output_dir_name}/executor_output'
+
+            # loop all over folders in qual directory using pyarrow
+            selector = fs.FileSelector(hdfs_qual_output_dir, recursive=False)
+            subdir_list = self.hdfs_fs.get_file_info(selector)
+            dfs = []
+            for subdir in subdir_list:
+                subdir_qual_path = subdir.path
+                report_file_path = os.path.join(subdir_qual_path, sub_folder, report_file_name)
+                dfs.append(Utilities.read_csv(report_file_path, self.hdfs_fs))
+            return pd.concat(dfs, ignore_index=True)
         except FileNotFoundError:
             self.logger.warning('Failed to read report file: %s', report_file_path)
             return pd.DataFrame()

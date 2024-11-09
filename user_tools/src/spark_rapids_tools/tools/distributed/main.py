@@ -110,10 +110,10 @@ class DistributedJarExecutor:
         run_jar_command = jar_runner.create_run_jar_map_func()
         app_statuses = self.spark_manager.submit_map_job(map_func=run_jar_command, input_list=eventlog_files)
         self._write_failed_app_statuses_to_hdfs(app_statuses, executor_output_path)
-        result_combiner = ResultCombiner(jar_output_folder=self._get_jar_output_path(),
-                                         executor_output_dir=executor_output_path,
-                                         hdfs_fs=self.hdfs_manager.get_fs())
-        result_combiner.combine_results()
+        # result_combiner = ResultCombiner(jar_output_folder=self._get_jar_output_path(),
+        #                                  executor_output_dir=executor_output_path,
+        #                                  hdfs_fs=self.hdfs_manager.get_fs())
+        # result_combiner.combine_results()
 
         self._cleanup()
 

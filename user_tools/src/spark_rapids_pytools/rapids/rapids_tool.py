@@ -19,6 +19,7 @@ import copy
 import logging
 import os
 import re
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -27,6 +28,7 @@ from logging import Logger
 from typing import Any, Callable, Dict, List, Optional
 
 import yaml
+from pyarrow import fs
 
 import spark_rapids_pytools
 from spark_rapids_pytools import get_spark_dep_version
@@ -71,6 +73,35 @@ class RapidsTool(object):
     ctxt: ToolContext = field(default=None, init=False)
     logger: Logger = field(default=None, init=False)
     spinner: ToolsSpinner = field(default=None, init=False)
+    hdfs_fs: Optional[fs.FileSystem] = field(default=None, init=False)
+
+    @classmethod
+    def init_hdfs(cls) -> fs.HadoopFileSystem:
+        assert os.getenv('HADOOP_HOME') is not None, 'HADOOP_HOME environment variable is not set'
+        # Set the CLASSPATH environment variable. This is required by pyarrow to access HDFS.
+        try:
+            result = cls.run_hdfs_command(['classpath', '--glob'], 'Setting Hadoop classpath')
+            hadoop_classpath = result.stdout.strip()
+            os.environ['CLASSPATH'] = os.pathsep.join(filter(None, [
+                os.environ.get('CLASSPATH', ''),
+                hadoop_classpath
+            ]))
+            return fs.HadoopFileSystem("default")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError('Error retrieving Hadoop classpath') from e
+
+    @classmethod
+    def run_hdfs_command(cls, cmd_args: list, description: str):
+        """Run an HDFS command and log its description."""
+        hdfs_bin = f'{os.getenv("HADOOP_HOME")}/bin/hdfs'
+        hadoop_bin = f'{os.getenv("HADOOP_HOME")}/bin/hadoop'
+        actual_bin = hdfs_bin if os.path.exists(hdfs_bin) else hadoop_bin
+        command = [actual_bin] + cmd_args
+        try:
+            return subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except Exception as e:
+            raise RuntimeError(f'Failed to run HDFS command: {description}, Error: {str(e)}') from e
+
 
     def get_tools_config_obj(self) -> Optional['ToolsConfig']:
         """

@@ -13,13 +13,16 @@
 # limitations under the License.
 
 """ Main module for QualX related commands """
-
+import subprocess
 from typing import Callable, List, Optional, Tuple, Set
 import glob
 import json
 import os
 import traceback
 from pathlib import Path
+
+from pyarrow import fs
+from pyarrow._fs import FileSelector
 from tabulate import tabulate
 from xgboost.core import XGBoostError, Booster
 import numpy as np
@@ -33,7 +36,7 @@ from spark_rapids_tools.tools.qualx.preprocess import (
     load_profiles,
     load_qtool_execs,
     load_qual_csv,
-    PREPROCESSED_FILE
+    PREPROCESSED_FILE, load_qtool_execs_hdfs, load_qual_csv_hdfs
 )
 from spark_rapids_tools.tools.qualx.model import (
     extract_model_features,
@@ -54,7 +57,7 @@ from spark_rapids_tools.tools.qualx.util import (
     print_speedup_summary,
     run_qualification_tool,
     RegexPattern,
-    INTERMEDIATE_DATA_ENABLED, create_row_with_default_speedup, write_csv_reports
+    INTERMEDIATE_DATA_ENABLED, create_row_with_default_speedup, write_csv_reports, find_paths_hdfs
 )
 from spark_rapids_pytools.common.utilities import Utils
 
@@ -113,7 +116,7 @@ def _get_model(platform: str,
     return xgb_model
 
 
-def _get_qual_data(qual: Optional[str]) -> Tuple[
+def _get_qual_data(qual: Optional[str], hdfs_fs: Optional[fs.HadoopFileSystem] = None) -> Tuple[
     Optional[pd.DataFrame],
     Optional[pd.DataFrame],
     List[str]
@@ -122,15 +125,15 @@ def _get_qual_data(qual: Optional[str]) -> Tuple[
         return None, None, []
 
     # load qual tool execs
-    qual_list = find_paths(
-        qual, RegexPattern.rapids_qual.match, return_directories=True
+    qual_list = find_paths_hdfs(
+        qual, hdfs_fs, RegexPattern.rapids_qual.match, return_directories=True
     )
     # load metrics directory from all qualification paths.
     # metrics follow the pattern 'qual_2024xx/rapids_4_spark_qualification_output/raw_metrics'
     qual_metrics = [
         path
         for q in qual_list
-        for path in find_paths(q, RegexPattern.qual_tool_metrics.match, return_directories=True)
+        for path in find_paths_hdfs(q, hdfs_fs, RegexPattern.qual_tool_metrics.match, return_directories=True)
     ]
     qual_execs = [
         os.path.join(
@@ -139,11 +142,12 @@ def _get_qual_data(qual: Optional[str]) -> Tuple[
         )
         for q in qual_list
     ]
-    node_level_supp = load_qtool_execs(qual_execs)
+    node_level_supp = load_qtool_execs_hdfs(qual_execs, hdfs_fs)
 
     # load qual tool per-app predictions
-    qualtool_output = load_qual_csv(
+    qualtool_output = load_qual_csv_hdfs(
         qual_list,
+        hdfs_fs,
         'rapids_4_spark_qualification_output.csv',
         ['App Name', 'App ID', 'App Duration'],
     )
@@ -547,11 +551,36 @@ def predict(
         output_info: dict,
         *,
         model: Optional[str] = None,
-        qual_tool_filter: Optional[str] = 'stage') -> pd.DataFrame:
+        qual_tool_filter: Optional[str] = 'stage',
+        hdfs_fs: Optional[fs.HadoopFileSystem] = None) -> pd.DataFrame:
     """Predict GPU speedup given CPU logs."""
 
     xgb_model = _get_model(platform, model=model)
-    node_level_supp, qual_tool_output, qual_metrics = _get_qual_data(qual)
+    # loop all over folders in qual directory using pyarrow
+    selector = FileSelector(qual, recursive=False)
+    subdir_list = hdfs_fs.get_file_info(selector)
+
+    node_level_supp_list = []
+    qual_tool_output_list = []
+    qual_metrics = []
+
+    for subdir in subdir_list:
+        subdir_qual_path = subdir.path
+        node_level_supp_raw, qual_tool_output_raw, qual_metrics_raw = _get_qual_data(subdir_qual_path, hdfs_fs=hdfs_fs)
+
+        # Append DataFrames and metrics to the respective lists
+        if node_level_supp_raw is not None:
+            node_level_supp_list.append(node_level_supp_raw)
+        if qual_tool_output_raw is not None:
+            qual_tool_output_list.append(qual_tool_output_raw)
+        if qual_metrics_raw:
+            qual_metrics.extend(qual_metrics_raw)  # Use extend to concatenate lists
+
+    # Concatenate the DataFrames after the loop
+
+    node_level_supp = pd.concat(node_level_supp_list, ignore_index=True) if node_level_supp_list else None
+    qual_tool_output = pd.concat(qual_tool_output_list, ignore_index=True) if qual_tool_output_list else None
+
     # create a DataFrame with default predictions for all app IDs.
     # this will be used for apps without predictions.
     default_preds_df = qual_tool_output.apply(create_row_with_default_speedup, axis=1)
@@ -577,7 +606,8 @@ def predict(
         datasets=datasets,
         node_level_supp=node_level_supp,
         qual_tool_filter=qual_tool_filter,
-        qual_tool_output=qual_tool_output
+        qual_tool_output=qual_tool_output,
+        hdfs_fs=hdfs_fs
     )
     if profile_df.empty:
         raise ValueError('Data preprocessing resulted in an empty dataset. Speedup predictions will default to 1.0.')

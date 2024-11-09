@@ -28,6 +28,9 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+
+from pyarrow import fs
+from pyarrow._fs import FileSelector
 from tabulate import tabulate
 import numpy as np
 import pandas as pd
@@ -92,6 +95,40 @@ def find_paths(directory: str, filter_fn: Callable = None, return_directories: b
                 paths.extend([os.path.join(root, file) for file in filtered_files])
     return paths
 
+
+def find_paths_hdfs(directory: str, hdfs_fs: fs.HadoopFileSystem,
+                    filter_fn: Callable = None, return_directories: bool = False) -> List[str]:
+    """Find all files or subdirectories in a directory on HDFS that match a filter function.
+
+    Parameters
+    ----------
+    directory: str
+        Path to the directory to search.
+    filter_fn: Callable
+        Filter function that selects files/directories.
+    return_directories: bool
+        If True, returns matching directories; otherwise, returns matching files.
+    """
+    paths = []
+
+    # Create a FileSelector to list files in the directory
+    selector = FileSelector(directory, recursive=False)
+    file_info = hdfs_fs.get_file_info(selector)
+
+    for info in file_info:
+        path = info.path
+        dir_name = os.path.basename(path)
+        # Apply filter function if provided
+        if filter_fn and not filter_fn(dir_name):
+            continue
+
+        # Check if we need to return directories or files
+        if return_directories and info.type == fs.FileType.Directory:
+            paths.append(path)
+        elif not return_directories and info.type == fs.FileType.File:
+            paths.append(path)
+
+    return paths
 
 def find_eventlogs(path: str) -> List[str]:
     """Find all eventlogs given a root directory."""
