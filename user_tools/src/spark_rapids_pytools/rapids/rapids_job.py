@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from logging import Logger
 from typing import List, Optional
 
+from pyspark.sql import SparkSession
+
 from spark_rapids_pytools.common.prop_manager import JSONPropertiesContainer
 from spark_rapids_pytools.common.utilities import ToolLogging, Utils
 from spark_rapids_pytools.rapids.tool_ctxt import ToolContext

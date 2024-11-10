@@ -18,6 +18,7 @@ import os
 import pathlib
 import re
 import ssl
+import subprocess
 import sys
 import textwrap
 import urllib
@@ -353,7 +354,7 @@ class Utilities:
         return f'{num_bytes:.2f} {size_units[i]}'
 
     @classmethod
-    def read_csv(cls, path, hdfs_fs: Optional[fs.FileSystem] = None):
+    def read_csv(cls, path, hdfs_fs: Optional[fs.FileSystem] = None) -> pd.DataFrame:
         if hdfs_fs:
             return cls.read_csv_from_hdfs(hdfs_fs, path)
         return pd.read_csv(path)
@@ -371,3 +372,30 @@ class Utilities:
             raise FileNotFoundError(f"Error: The file '{file_path}' does not exist on HDFS.")
         except fs.ArrowIOError as e:
             raise fs.ArrowIOError(f"IOError while trying to read the file '{file_path}': {e}")
+
+    @classmethod
+    def init_hdfs(cls) -> fs.HadoopFileSystem:
+        assert os.getenv('HADOOP_HOME') is not None, 'HADOOP_HOME environment variable is not set'
+        # Set the CLASSPATH environment variable. This is required by pyarrow to access HDFS.
+        try:
+            result = cls.run_hdfs_command(['classpath', '--glob'], 'Setting Hadoop classpath')
+            hadoop_classpath = result.stdout.strip()
+            os.environ['CLASSPATH'] = os.pathsep.join(filter(None, [
+                os.environ.get('CLASSPATH', ''),
+                hadoop_classpath
+            ]))
+            return fs.HadoopFileSystem("default")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError('Error retrieving Hadoop classpath') from e
+
+    @classmethod
+    def run_hdfs_command(cls, cmd_args: list, description: str):
+        """Run an HDFS command and log its description."""
+        hdfs_bin = f'{os.getenv("HADOOP_HOME")}/bin/hdfs'
+        hadoop_bin = f'{os.getenv("HADOOP_HOME")}/bin/hadoop'
+        actual_bin = hdfs_bin if os.path.exists(hdfs_bin) else hadoop_bin
+        command = [actual_bin] + cmd_args
+        try:
+            return subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except Exception as e:
+            raise RuntimeError(f'Failed to run HDFS command: {description}, Error: {str(e)}') from e

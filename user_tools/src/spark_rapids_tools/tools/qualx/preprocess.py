@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """ Utility functions for preprocessing for QualX """
+import concurrent.futures
 import io
 from itertools import chain
 from pathlib import Path
@@ -488,6 +489,7 @@ def read_csv_from_hdfs(file_path: str, hdfs_fs: fs.FileSystem) -> pd.DataFrame:
         # Use io.BytesIO to convert the bytes to a file-like object that pandas can read
         return pd.read_csv(io.BytesIO(file_content))
 
+
 def extract_raw_features(
     toc: pd.DataFrame,
     node_level_supp: Optional[pd.DataFrame],
@@ -498,10 +500,15 @@ def extract_raw_features(
     """Given a pandas dataframe of CSV files, extract raw features into a single dataframe keyed by (appId, sqlID)."""
     # read all tables per appId
     unique_app_ids = toc['appId'].unique()
-    app_id_tables = [
-        load_csv_files(toc, app_id, node_level_supp, qualtool_filter, qualtool_output, hdfs_fs)
-        for app_id in unique_app_ids
-    ]
+
+    # Partial function to pre-set parameters for load_csv_files
+    def load_csv_files_fn_partial(app_id: str):
+        return load_csv_files(toc, app_id, node_level_supp, qualtool_filter, qualtool_output, hdfs_fs)
+
+    # Use ThreadPoolExecutor for parallel processing
+    num_threads = min(os.cpu_count() - 2, len(unique_app_ids))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        app_id_tables = list(executor.map(load_csv_files_fn_partial, unique_app_ids))
 
     def combine_tables(table_name: str) -> pd.DataFrame:
         """Combine csv tables (by name) across all appIds."""
@@ -852,6 +859,7 @@ def load_csv_files(
     """
     Load profiler CSV files into memory.
     """
+    assert app_id is not None and len(app_id) > 0, 'app_id must be a non-empty string.'
 
     def scan_tbl_local(
         tb_name: str, abort_on_error: bool = False, warn_on_error: bool = True

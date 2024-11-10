@@ -17,15 +17,13 @@
 import json
 import os
 import re
-import sys
 from dataclasses import dataclass, field
-from io import BytesIO
 from typing import Any, List, Callable, Optional, Dict
 
 import numpy as np
 import pandas as pd
-from param import FileSelector
 from pyarrow import fs
+from pyspark.sql import SparkSession
 from tabulate import tabulate
 
 from spark_rapids_pytools.cloud_api.sp_types import ClusterBase
@@ -37,13 +35,12 @@ from spark_rapids_pytools.rapids.rapids_tool import RapidsJarTool
 from spark_rapids_tools.enums import QualFilterApp, QualEstimationModel
 from spark_rapids_tools.tools.additional_heuristics import AdditionalHeuristics
 from spark_rapids_tools.tools.cluster_config_recommender import ClusterConfigRecommender
-from spark_rapids_tools.tools.qualx.qualx_main import predict
 from spark_rapids_tools.tools.qualification_stats_report import SparkQualificationStats
+from spark_rapids_tools.tools.qualx.qualx_main import predict
 from spark_rapids_tools.tools.speedup_category import SpeedupCategory
 from spark_rapids_tools.tools.top_candidates import TopCandidates
 from spark_rapids_tools.tools.unsupported_ops_stage_duration import UnsupportedOpsStageDuration
 from spark_rapids_tools.utils.util import Utilities
-
 
 @dataclass
 class QualificationSummary:
@@ -307,7 +304,7 @@ class Qualification(RapidsJarTool):
                                                                               'unsupportedOperators'))
         # Generate the statistics report
         try:
-            stats_report = SparkQualificationStats(ctxt=self.ctxt)
+            stats_report = SparkQualificationStats(ctxt=self.ctxt,hdfs_fs=self.hdfs_fs)
             stats_report.report_qualification_stats()
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error('Failed to generate the statistics report: %s', e)
@@ -368,8 +365,9 @@ class Qualification(RapidsJarTool):
         if not self._evaluate_rapids_jar_tool_output_exist():
             return
 
-        self.hdfs_fs = self.init_hdfs()
+        self.hdfs_fs = Utilities.init_hdfs()
         df = self._read_qualification_output_file('summaryReport')
+        spark = SparkSession.getActiveSession()
         # 1. Operations related to XGboost modelling
         if self.ctxt.get_ctxt('estimationModelArgs')['xgboostEnabled'] and not df.empty:
             try:

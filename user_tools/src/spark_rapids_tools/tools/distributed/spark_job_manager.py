@@ -29,20 +29,12 @@ from spark_rapids_tools.tools.distributed.utils import Utilities
 
 
 @dataclass
-class SparkJobManager:
-    """ Class to manage Spark jobs """
-    spark_config_file: str
-    dependencies_paths: List[str]
-    jvm_log_file: str
-    log_file_path: str
-    cache_dir: str
+class SparkSessionManager:
+    spark_config_file: str = field(init=True)
+    cache_dir: str = field(init=True)
+    dependencies_paths: List[str] = field(default=None, init=True)
+    jvm_log_file: str = field(default=None, init=True)
     _spark_context: SparkContext = field(default=None, init=False)
-
-    def __post_init__(self):
-        logging.getLogger('py4j').setLevel(logging.ERROR)
-        self._check_spark_submit_availability()
-        self._initialize_spark_context()
-        self._add_files_to_spark_context()
 
     @classmethod
     def _set_spark_context(cls, spark_context: SparkContext) -> None:
@@ -53,14 +45,26 @@ class SparkJobManager:
         return cls._spark_context
 
     @staticmethod
-    def _check_spark_submit_availability():
-        check_command = ['spark-submit', '--version']
-        Utilities.check_cmd_availability('spark-submit', check_command)
-        # Add Spark Python path to PYTHONPATH
-        os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, [
-            f"{os.environ['SPARK_HOME']}/python",
-            os.environ.get('PYTHONPATH', '')
-        ]))
+    def _set_env():
+        spark_home = os.environ.get('SPARK_HOME')
+        if spark_home:
+            python_path = os.path.join(spark_home, 'python')
+            os.environ['PYTHONPATH'] = f'{python_path}:{os.environ.get("PYTHONPATH", "")}'
+
+    def _get_python_dependencies(self) -> List[str]:
+        folder_path = os.path.join(Utilities.get_project_root(), 'distributed')
+        dest_zip_path = os.path.join(self.cache_dir, 'distributed.zip')
+        zip_path = Utilities.zip_folder(folder_path, dest_zip_path)
+        return [zip_path]
+
+    def _add_files_to_spark_context(self):
+        if self.dependencies_paths:
+            for dep_path in self.dependencies_paths:
+                self._get_spark_context().addFile(dep_path)
+        for dep_path in self._get_python_dependencies():
+            self._get_spark_context().addPyFile(dep_path)
+        if self.jvm_log_file:
+            self._get_spark_context().addFile(self.jvm_log_file)
 
     def _parse_spark_conf(self) -> dict:
         spark_conf = {}
@@ -109,7 +113,7 @@ class SparkJobManager:
         spark.stop()
         return spark_conf
 
-    def _initialize_spark_context(self):
+    def _create_spark_session_internal(self):
         spark_builder = SparkSession.builder.appName('Distributed Qualification Tool')
         spark_confs = self._generate_spark_conf()
         logging.info('Setting Spark configurations\n: %s', json.dumps(spark_confs, indent=4))
@@ -118,28 +122,60 @@ class SparkJobManager:
         spark_builder.config('spark.submit.deployMode', 'client')
         spark_builder.config('spark.executorEnv.PYTHONPATH', os.environ['PYTHONPATH'])
         spark = spark_builder.getOrCreate()
+        return spark
+
+    def create_spark_session(self):
+        spark = self._create_spark_session_internal()
         self._set_spark_context(spark.sparkContext)
+        self._add_files_to_spark_context()
         self._set_env()
+        return spark
 
-    def _get_python_dependencies(self) -> List[str]:
-        folder_path = os.path.join(Utilities.get_project_root(), 'distributed')
-        dest_zip_path = os.path.join(self.cache_dir, 'distributed.zip')
-        zip_path = Utilities.zip_folder(folder_path, dest_zip_path)
-        return [zip_path]
 
-    def _add_files_to_spark_context(self):
-        for dep_path in self.dependencies_paths:
-            self._get_spark_context().addFile(dep_path)
-        for dep_path in self._get_python_dependencies():
-            self._get_spark_context().addPyFile(dep_path)
-        self._get_spark_context().addFile(self.jvm_log_file)
+@dataclass
+class SparkJobManager:
+    """ Class to manage Spark jobs """
+    spark_config_file: str
+    dependencies_paths: List[str]
+    jvm_log_file: str
+    log_file_path: str
+    cache_dir: str
+    _spark_context: SparkContext = field(default=None, init=False)
+
+    @classmethod
+    def _set_spark_context(cls, spark_context: SparkContext) -> None:
+        cls._spark_context = spark_context
+
+    @classmethod
+    def _get_spark_context(cls) -> SparkContext:
+        return cls._spark_context
+
+    def __post_init__(self):
+        logging.getLogger('py4j').setLevel(logging.ERROR)
+        self._check_spark_submit_availability()
+        self.initialize_spark_context()
 
     @staticmethod
-    def _set_env():
-        spark_home = os.environ.get('SPARK_HOME')
-        if spark_home:
-            python_path = os.path.join(spark_home, 'python')
-            os.environ['PYTHONPATH'] = f'{python_path}:{os.environ.get("PYTHONPATH", "")}'
+    def _check_spark_submit_availability():
+        check_command = ['spark-submit', '--version']
+        Utilities.check_cmd_availability('spark-submit', check_command)
+        # Add Spark Python path to PYTHONPATH
+        os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, [
+            f"{os.environ['SPARK_HOME']}/python",
+            os.environ.get('PYTHONPATH', '')
+        ]))
+
+    def initialize_spark_context(self):
+        spark_session_manager = SparkSessionManager(
+            spark_config_file=self.spark_config_file,
+            cache_dir=self.cache_dir,
+            dependencies_paths=self.dependencies_paths,
+            jvm_log_file=self.jvm_log_file)
+        os.environ['DIST_QUAL_CACHE_DIR'] = self.cache_dir
+        if self.spark_config_file and len(self.spark_config_file) > 0:
+            os.environ['DIST_SPARK_CONF_FILE'] = self.spark_config_file
+        spark = spark_session_manager.create_spark_session()
+        self._set_spark_context(spark.sparkContext)
 
     def _convert_input_to_rdd(self, input_list: list) -> RDD:
         num_partitions = len(input_list)

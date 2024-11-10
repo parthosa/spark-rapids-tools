@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 
 import pandas as pd
 from pyarrow import fs
+from pyspark.sql import SparkSession
 
 from spark_rapids_pytools.common.prop_manager import YAMLPropertiesContainer
 from spark_rapids_pytools.common.sys_storage import FSUtil
@@ -115,7 +116,7 @@ class DistributedJarExecutor:
         #                                  hdfs_fs=self.hdfs_manager.get_fs())
         # result_combiner.combine_results()
 
-        self._cleanup()
+        # self._cleanup()
 
     # Define getters for the output paths
     def _get_local_cache_dir(self) -> str:

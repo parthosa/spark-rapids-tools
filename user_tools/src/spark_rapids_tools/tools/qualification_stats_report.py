@@ -13,16 +13,17 @@
 # limitations under the License.
 
 """Implementation of the Qualification Stats Report."""
-
-
+import os
 from dataclasses import dataclass, field
 from logging import Logger
 
 import pandas as pd
+from pyarrow import fs
 
 from spark_rapids_pytools.common.sys_storage import FSUtil
 from spark_rapids_pytools.common.utilities import ToolLogging
 from spark_rapids_pytools.rapids.tool_ctxt import ToolContext
+from spark_rapids_tools.utils import Utilities
 
 
 @dataclass
@@ -59,10 +60,31 @@ App ID  SQL ID   Operator  Count StageTaskDuration TotalSQLTaskDuration  % of To
     output_columns: dict = field(default=None, init=False)
     qual_output: str = field(default=None, init=True)
     ctxt: ToolContext = field(default=None, init=True)
+    hdfs_fs: fs.FileSystem = field(default=None, init=True)
 
     def __post_init__(self) -> None:
         self.logger = ToolLogging.get_and_setup_logger('rapids.tools.qualification.stats')
         self.output_columns = self.ctxt.get_value('local', 'output', 'files', 'statistics')
+
+    def load_report_file(self, qual_output_dir, file_key, hdfs_fs) -> pd.DataFrame:
+        """
+        Helper function to load a report CSV file.
+
+        Args:
+            ctxt: Context object to get the file name.
+            qual_output_dir: The base directory where output files are stored.
+            file_key: Key used to retrieve the specific file name in the context.
+            hdfs_fs: Filesystem handler for reading the CSV file (e.g., HDFS or local).
+
+        Returns:
+            DataFrame containing the contents of the CSV file.
+        """
+        # Get the file name from context
+        report_file = self.ctxt.get_value('toolOutput', 'csv', file_key, 'fileName')
+        # Build the full path to the file
+        full_path = FSUtil.build_path(qual_output_dir, report_file)
+        # Read and return the CSV file as a DataFrame
+        return Utilities.read_csv(full_path, hdfs_fs)
 
     def _read_csv_files(self) -> None:
         self.logger.info('Reading CSV files...')
@@ -71,20 +93,32 @@ App ID  SQL ID   Operator  Count StageTaskDuration TotalSQLTaskDuration  % of To
         else:
             qual_output_dir = self.qual_output
 
-        unsupported_operator_report_file = self.ctxt.get_value(
-            'toolOutput', 'csv', 'unsupportedOperatorsReport', 'fileName')
-        rapids_unsupported_operators_file = FSUtil.build_path(
-            qual_output_dir, unsupported_operator_report_file)
-        self.unsupported_operators_df = pd.read_csv(rapids_unsupported_operators_file)
+        qual_output_dir_name = os.path.basename(os.path.dirname(qual_output_dir))
+        sub_folder = 'rapids_4_spark_qualification_output'
+        hdfs_cache_dir = '/var/tmp/spark_rapids_user_tools_distributed_cache'
+        hdfs_qual_output_dir = f'{hdfs_cache_dir}/{qual_output_dir_name}/executor_output'
 
-        stages_report_file = self.ctxt.get_value('toolOutput', 'csv', 'stagesInformation',
-                                                 'fileName')
-        rapids_stages_file = FSUtil.build_path(qual_output_dir, stages_report_file)
-        self.stages_df = pd.read_csv(rapids_stages_file)
+        selector = fs.FileSelector(hdfs_qual_output_dir, recursive=False)
+        subdir_list = self.hdfs_fs.get_file_info(selector)
 
-        rapids_execs_file = self.ctxt.get_value('toolOutput', 'csv', 'execsInformation',
-                                                'fileName')
-        self.execs_df = pd.read_csv(FSUtil.build_path(qual_output_dir, rapids_execs_file))
+        unsupported_operators_raw = []
+        stages_df_raw = []
+        execs_df_raw = []
+
+        for subdir in subdir_list:
+            subdir_qual_path = os.path.join(subdir.path, sub_folder)
+            unsupported_operators_raw.append(self.load_report_file(
+                subdir_qual_path, 'unsupportedOperatorsReport', self.hdfs_fs))
+
+            stages_df_raw.append( self.load_report_file(
+                subdir_qual_path, 'stagesInformation', self.hdfs_fs))
+
+            execs_df_raw.append(self.load_report_file(
+                subdir_qual_path, 'execsInformation', self.hdfs_fs))
+
+        self.unsupported_operators_df = pd.concat(unsupported_operators_raw, ignore_index=True)
+        self.stages_df = pd.concat(stages_df_raw, ignore_index=True)
+        self.execs_df = pd.concat(execs_df_raw, ignore_index=True)
         self.logger.info('Reading CSV files completed.')
 
     def _convert_durations(self) -> None:
