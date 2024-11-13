@@ -30,7 +30,7 @@ class ToolSubmissionCommand:
     classpath_arr: List[str]
     hadoop_classpath: str
     jar_main_class: str
-    rapids_arguments: List[str]
+    output_dir_args: List[str]
     extra_rapids_args: List[str]
     output_folder: str
     work_dir: str
@@ -60,6 +60,6 @@ class ToolSubmissionCommand:
         cmd_arg.extend(self.jvm_args)
         cmd_arg.extend(self.classpath_arr)
         cmd_arg.append(self.jar_main_class)
-        cmd_arg.extend(self.rapids_arguments)
+        cmd_arg.extend(self.output_dir_args)
         cmd_arg.extend(self.extra_rapids_args)
         return cmd_arg
