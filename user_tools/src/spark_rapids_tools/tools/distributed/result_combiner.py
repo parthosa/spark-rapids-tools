@@ -139,6 +139,23 @@ class RawMetricsProcessor(FileProcessor):
                           source_filesystem=self.hdfs_fs)
 
 
+# Raw Metrics Processor
+class TuningProcessor(FileProcessor):
+    """ Class to process tuning folder. """
+
+    def process(self):
+        tuning_src_path = os.path.join(self.inner_directory.path, 'tuning')
+        tuning_dest_path = os.path.join(self.jar_output_folder, 'tuning')
+        if not os.path.exists(tuning_dest_path):
+            os.mkdir(tuning_dest_path)
+        # Copy the tuning directory to the combined output path using pyarrow.fs.copy_files()
+        # check if the tuning directory exists using pyarrow
+        if Utilities.resource_exists(tuning_src_path, self.hdfs_fs):
+            fs.copy_files(source=tuning_src_path,
+                          destination=tuning_dest_path,
+                          source_filesystem=self.hdfs_fs)
+
+
 # Runtime Properties Processor
 class RuntimePropertiesProcessor(FileProcessor):
     """ Class to process runtime properties file. """
@@ -181,6 +198,7 @@ class ResultCombiner:
             JSONProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder, self.combined_json_data).process()
             LogProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder).process()
             RawMetricsProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder).process()
+            TuningProcessor(inner_dir_info, self.hdfs_fs, self.jar_output_folder).process()
 
         # Write the combined CSV and JSON data
         self._write_combined_csv()
