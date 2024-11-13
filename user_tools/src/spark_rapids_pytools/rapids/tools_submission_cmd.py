@@ -42,7 +42,8 @@ class ToolSubmissionCommand:
             # check for log4j properties file
             if 'Dlog4j.configuration' in arg:
                 self.jvm_log_file = arg.split('=')[1]
-        exclusion_regex = r'(spark-\d+\.\d+\.\d+-bin-hadoop\d+|/[^/]*hadoop[^/]*)'  # Filter out spark and hadoop jars
+        # We need to filter out the hadoop and spark jars from the classpath
+        exclusion_regex = r'(spark-\d+\.\d+\.\d+-bin-hadoop\d+|/[^/]*hadoop[^/]*)'
         classpath_arr_list = self.classpath_arr[1].split(':')
         self.dependencies_paths = []
         for path in classpath_arr_list:

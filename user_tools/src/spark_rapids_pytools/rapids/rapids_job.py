@@ -218,8 +218,7 @@ class RapidsLocalJob(RapidsJob):
                 vm_args.append(val)
         return vm_args
 
-    def _build_submission_cmd(self) -> list:
-        # env vars are added later as a separate dictionary
+    def _build_submission_cmd_internal(self) -> ToolSubmissionCommand:
         classpath_arr = self._build_classpath()
         hadoop_cp = self._get_hadoop_classpath()
         jvm_args_arr = self._build_jvm_args()
@@ -228,25 +227,16 @@ class RapidsLocalJob(RapidsJob):
         extra_rapids_args = self.prop_container.get_rapids_args()
         output_folder = self.exec_ctxt.get_output_folder()
         work_dir = self.exec_ctxt.get_local_work_dir()
-        submission_cmd = ToolSubmissionCommand(jvm_args_arr, classpath_arr, hadoop_cp, jar_main_class,
-                                               rapids_arguments, extra_rapids_args, output_folder,
-                                               work_dir)
+        return ToolSubmissionCommand(jvm_args_arr, classpath_arr, hadoop_cp, jar_main_class,
+                                     rapids_arguments, extra_rapids_args, output_folder, work_dir)
+
+    def _build_submission_cmd(self) -> list:
+        # env vars are added later as a separate dictionary
+        submission_cmd = self._build_submission_cmd_internal()
         return submission_cmd.build_cmd_local()
 
     def _build_submission_cmd_distributed(self) -> ToolSubmissionCommand:
-        # env vars are added later as a separate dictionary
-        classpath_arr = self._build_classpath()
-        hadoop_cp = self._get_hadoop_classpath()
-        jvm_args_arr = self._build_jvm_args()
-        jar_main_class = self.prop_container.get_jar_main_class()
-        rapids_arguments = self._get_persistent_rapids_args()
-        extra_rapids_args = self.prop_container.get_rapids_args()
-        output_folder = self.exec_ctxt.get_output_folder()
-        work_dir = self.exec_ctxt.get_local_work_dir()
-        submission_cmd = ToolSubmissionCommand(jvm_args_arr, classpath_arr, hadoop_cp, jar_main_class,
-                                               rapids_arguments, extra_rapids_args, output_folder,
-                                               work_dir)
-        return submission_cmd
+        return self._build_submission_cmd_internal()
 
     def _submit_job(self, cmd_args: list) -> str:
         env_args = self.prop_container.get_value_silent('platformArgs', 'envArgs')

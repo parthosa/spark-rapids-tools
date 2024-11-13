@@ -46,31 +46,15 @@ class SparkJobRunner:
 
     platform: str = field(init=True)
     config: SparkJobConfig = field(init=True)
-    platform_env_vars_map: dict = field(init=False)
 
-    def __post_init__(self):
-        # TODO: Add support for other platforms
-        self.platform_env_vars_map = {
-            'emr': {
-                'SPARK_HOME': '/usr/lib/spark',
-                'JAVA_HOME': '/etc/alternatives/jre',
-                'HADOOP_HOME': '/usr/lib/hadoop'
-            },
-            'dataproc': {
-                'SPARK_HOME': '/usr/lib/spark',
-                'JAVA_HOME': '/usr/lib/jvm/temurin-11-jdk-amd64',
-                'HADOOP_HOME': '/usr/lib/hadoop'
-            }
-        }
-
-    def get_env_var(self, key: str) -> str:
+    @staticmethod
+    def get_env_var(key: str) -> str:
         """
         Get the environment variable value based on the platform and key.
         """
-
         env_var = os.getenv(key)
         if env_var is None:
-            env_var = self.platform_env_vars_map.get(self.platform).get(key)
+            raise ValueError(f'Environment variable {key} not found.')
         return env_var
 
     def create_run_jar_map_func(self):
@@ -88,8 +72,6 @@ class SparkJobRunner:
             # Run the JAR command
             jar_command = self._get_jar_command(file_path, executor_output_dir)
             exec_logs, app_status = self._submit_jar_cmd(jar_command)
-            # if app_status.status == AppStatus.FAILURE:
-            #     app_status.write_to_csv(executor_output_dir, self.hdfs_manager.get_fs())
             logs.extend(exec_logs)
             return logs, app_status
 
@@ -155,7 +137,6 @@ class SparkJobRunner:
             logs.append(f'Unexpected error: {ex}')
             app_status = AppStatusResult(path=jar_command[-1], status=AppStatus.FAILURE,
                                          message=str(ex))
-
         finally:
             processing_time = datetime.now() - start_time
             logs.append(f'Total processing time: {processing_time}')
