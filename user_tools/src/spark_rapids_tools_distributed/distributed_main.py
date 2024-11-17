@@ -23,17 +23,18 @@ from typing import List, ClassVar
 
 import pandas as pd
 
-from spark_rapids_tools_distributed.jar_cmd_args import JarCmdArgs
-from spark_rapids_tools_distributed.spark_map_task.jar_runner import SparkJarRunner
-from spark_rapids_tools_distributed.spark_map_task.status_reporter import AppStatusResult, FailureAppStatus, AppStatus
-from spark_rapids_tools_distributed.output_processing.combiner import QualificationOutputCombiner
-from spark_rapids_tools_distributed.spark_management.spark_job_submitter import SparkJobSubmitter
-from spark_rapids_tools_distributed.spark_management.spark_session_builder import SparkSessionBuilder
 from spark_rapids_pytools.common.prop_manager import YAMLPropertiesContainer
 from spark_rapids_pytools.common.sys_storage import FSUtil
 from spark_rapids_pytools.common.utilities import Utils, ToolLogging
 from spark_rapids_tools import CspPath
+from spark_rapids_tools.configuration.distributed_tools_config import DistributedToolsConfig
 from spark_rapids_tools.storagelib import HdfsPath, LocalPath, CspFs
+from spark_rapids_tools_distributed.jar_cmd_args import JarCmdArgs
+from spark_rapids_tools_distributed.output_processing.combiner import QualificationOutputCombiner
+from spark_rapids_tools_distributed.spark_management.spark_job_submitter import SparkJobSubmitter
+from spark_rapids_tools_distributed.spark_management.spark_session_builder import SparkSessionBuilder
+from spark_rapids_tools_distributed.spark_map_task.jar_runner import SparkJarRunner
+from spark_rapids_tools_distributed.spark_map_task.status_reporter import AppStatusResult, FailureAppStatus, AppStatus
 
 
 @dataclass
@@ -41,7 +42,7 @@ class DistributedToolsExecutor:
     """
     Class to orchestrate the execution of the Spark Rapids Tools JAR on Spark.
     """
-    spark_config_file: str = field(default=None, init=True)
+    distributed_tools_configs: DistributedToolsConfig = field(default=None, init=True)
     platform: str = field(default=None, init=True)
     output_folder: str = field(default=None, init=True)
     jar_cmd_args: JarCmdArgs = field(default=None, init=True)
@@ -125,8 +126,9 @@ class DistributedToolsExecutor:
 
     def _create_spark_session_builder(self) -> SparkSessionBuilder:
         """Submit the Spark job using the SparkJobManager."""
+        spark_properties = self.distributed_tools_configs.spark_properties if self.distributed_tools_configs else []
         return SparkSessionBuilder(
-            spark_config_file=self.spark_config_file,
+            spark_properties=spark_properties,
             props=self.props.get_value('sparkSessionBuilder'),
             cache_dir=self._get_local_cache_dir(),
             dependencies_paths=[self.jar_cmd_args.tools_jar_path, self.jar_cmd_args.jvm_log_file])

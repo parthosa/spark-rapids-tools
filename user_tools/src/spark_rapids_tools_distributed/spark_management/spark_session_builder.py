@@ -24,6 +24,7 @@ from logging import Logger
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
 
+from spark_rapids_tools.configuration.distributed_tools_config import SparkProperty
 from spark_rapids_tools.utils.util import Utilities
 from spark_rapids_pytools.common.prop_manager import JSONPropertiesContainer
 from spark_rapids_pytools.common.utilities import ToolLogging
@@ -33,7 +34,7 @@ from spark_rapids_pytools.common.utilities import ToolLogging
 class SparkSessionBuilder:
     """ Class responsible for building and configuring the Spark session """
 
-    spark_config_file: str = field(default=None, init=True)
+    spark_properties: List[SparkProperty] = field(default=None, init=True)
     props: JSONPropertiesContainer = field(default=None, init=True)
     cache_dir: str = field(default=None, init=True)
     dependencies_paths: List[str] = field(default=None, init=True)
@@ -48,22 +49,8 @@ class SparkSessionBuilder:
         self._initialize_spark_context()
 
     def _parse_spark_conf(self) -> Dict[str, str]:
-        """ Parse the Spark configuration file and return configurations as a dictionary """
-        spark_conf = {}
-        if not self.spark_config_file:
-            self.logger.info('No Spark configuration file provided. Using default configurations.')
-        elif not os.path.exists(self.spark_config_file):
-            self.logger.info('Spark configuration file not found. Using default configurations.')
-        else:
-            try:
-                with open(self.spark_config_file, 'r', encoding='utf-8') as conf_file:
-                    for line in conf_file:
-                        if line.strip() and not line.strip().startswith('#'):
-                            key, value = line.strip().split(None, 1)
-                            spark_conf[key] = value
-            except Exception as e:  # pylint: disable=broad-except
-                self.logger.error('Error reading Spark configuration file: %s', e)
-        return spark_conf
+        """Parse the Spark configurations"""
+        return {prop.name: prop.value for prop in self.spark_properties}
 
     def _generate_spark_conf(self, min_heap_memory_per_task=4, task_cpus=1) -> Dict[str, str]:
         """ Generate Spark configurations """
