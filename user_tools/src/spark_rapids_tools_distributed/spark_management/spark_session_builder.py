@@ -18,6 +18,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List
 from logging import Logger
 
@@ -97,17 +98,19 @@ class SparkSessionBuilder:
     def _get_python_dependencies(self) -> List[str]:
         """Returns the list of Python dependencies to be added to the Spark context."""
         current_file_path = os.path.abspath(__file__)
-        folder_path = os.path.dirname(current_file_path)
-        module_name = os.path.basename(folder_path)
+        folder_path = Path(current_file_path).parent.parent
+        module_name = folder_path.name
         dest_zip_path = os.path.join(self.cache_dir, module_name + '.zip')
-        zip_path = Utilities.zip_folder(folder_path, dest_zip_path)
+        zip_path = Utilities.zip_folder(folder_path.as_posix(), dest_zip_path)
         return [zip_path]
 
     def _add_files_to_spark_context(self):
         """Adds dependencies and files to the Spark context."""
         for dep_path in self.dependencies_paths:
+            self.logger.info('Adding dependencies to Spark context: %s', dep_path)
             self.spark_context.addFile(dep_path)
         for dep_path in self._get_python_dependencies():
+            self.logger.info('Adding Python dependencies to Spark context: %s', dep_path)
             self.spark_context.addPyFile(dep_path)
 
     @property
