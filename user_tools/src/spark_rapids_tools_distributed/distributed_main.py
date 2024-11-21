@@ -29,6 +29,7 @@ from spark_rapids_pytools.common.utilities import Utils, ToolLogging
 from spark_rapids_tools import CspPath
 from spark_rapids_tools.configuration.distributed_tools_config import DistributedToolsConfig
 from spark_rapids_tools.storagelib import HdfsPath, LocalPath, CspFs
+from spark_rapids_tools_distributed.event_log_processor import EventLogProcessor
 from spark_rapids_tools_distributed.jar_cmd_args import JarCmdArgs
 from spark_rapids_tools_distributed.output_processing.combiner import QualificationOutputCombiner
 from spark_rapids_tools_distributed.spark_management.spark_job_submitter import SparkJobSubmitter
@@ -97,7 +98,7 @@ class DistributedToolsExecutor:
 
         # List all event log files from the provided event logs path
         event_log_path = CspPath(self.jar_cmd_args.event_logs_path)
-        eventlog_files = CspFs.list_all_files(event_log_path)
+        eventlog_files = EventLogProcessor.get_event_log_info(event_log_path)
 
         # Initialize the JAR runner. We convert submission_cmd to a dictionary to pass it to the runner.
         # Assumption: Path to SPARK_HOME, JAVA_HOME etc, on worker nodes are same as the driver node.
