@@ -14,6 +14,7 @@
 
 """ Utility functions for preprocessing for QualX """
 
+from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
 from pathlib import Path
 from typing import Any, List, Mapping, Optional, Tuple, Dict
@@ -406,10 +407,15 @@ def extract_raw_features(
     """Given a pandas dataframe of CSV files, extract raw features into a single dataframe keyed by (appId, sqlID)."""
     # read all tables per appId
     unique_app_ids = toc['appId'].unique()
-    app_id_tables = [
-        load_csv_files(toc, app_id, node_level_supp, qualtool_filter, qualtool_output)
-        for app_id in unique_app_ids
-    ]
+
+    # Partial function to pre-set parameters for load_csv_files
+    def load_csv_files_fn_partial(app_id: str):
+        return load_csv_files(toc, app_id, node_level_supp, qualtool_filter, qualtool_output)
+
+    # Use ThreadPoolExecutor for parallel processing
+    num_threads = min(os.cpu_count() - 2, len(unique_app_ids))
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        app_id_tables = list(executor.map(load_csv_files_fn_partial, unique_app_ids))
 
     def combine_tables(table_name: str) -> pd.DataFrame:
         """Combine csv tables (by name) across all appIds."""
@@ -1124,7 +1130,9 @@ def load_qtool_execs(qtool_execs: List[str]) -> Optional[pd.DataFrame]:
         return action == 'IgnoreNoPerf'
 
     if qtool_execs:
-        exec_info = pd.concat([pd.read_csv(f) for f in qtool_execs])
+        num_threads = min(os.cpu_count() - 2, len(qtool_execs))
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            exec_info = pd.concat(executor.map(pd.read_csv, qtool_execs), ignore_index=True)
         node_level_supp = exec_info.copy()
         node_level_supp['Exec Is Supported'] = (
             node_level_supp['Exec Is Supported']
