@@ -1159,7 +1159,9 @@ def load_qual_csv(
     qual_csv = [os.path.join(q, csv_filename) for q in qual_dirs]
     df = None
     if qual_csv:
-        df = pd.concat([pd.read_csv(f) for f in qual_csv])
+        num_threads = min(os.cpu_count() - 2, len(qual_csv))
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            df = pd.concat(executor.map(pd.read_csv, qual_csv), ignore_index=True)
         if cols:
             df = df[cols]
     return df

@@ -658,9 +658,10 @@ class Qualification(RapidsJarTool):
         # Rename columns from each DataFrame in the app_info_dict and merge them with the tools_processed_apps
         merged_dfs = []
         for df in app_info_dict.values():
-            merged_dfs.append(
-                df[['appId', 'sparkRuntime']].rename(columns={'appId': 'App ID', 'sparkRuntime': 'Spark Runtime'})
-            )
+            if 'sparkRuntime' in df.columns:
+                merged_dfs.append(
+                    df[['appId', 'sparkRuntime']].rename(columns={'appId': 'App ID', 'sparkRuntime': 'Spark Runtime'})
+                )
         spark_runtime_df = pd.concat(merged_dfs, ignore_index=True)
         return tools_processed_apps.merge(spark_runtime_df, on='App ID', how='left')
 
