@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2024, NVIDIA CORPORATION.
+ * Copyright (c) 2023-2025, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -132,6 +132,8 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
   var recommendedClusterInfo: Option[RecommendedClusterInfo] = None
   // the number of GPUs to use, this might be updated as we handle different cases
   var numGpus: Int = 1
+  // minimum number of cores per executor
+  val MIN_CORES_PER_EXEC: Int = 16
   // Default runtime for the platform
   val defaultRuntime: SparkRuntime.SparkRuntime = SparkRuntime.SPARK
   // Set of supported runtimes for the platform
@@ -292,7 +294,7 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
     }
   }
 
-  def getNumGPUsPerNode(): Int = {
+  def getNumGPUsPerNode: Int = {
     val gpus = if (clusterProperties.isDefined) {
       clusterProperties.get.gpu.getCount
     } else {
@@ -323,7 +325,7 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
   }
 
   // figure out memory MB per node when we don't have the specific instance information
-  def getMemoryMBPerNode(sparkProperties: Map[String, String]): Long = {
+  def getMemoryMBPerNode(sparkProperties: Map[String, String], numExecsPerNode: Int): Long = {
     // To keep backwards compatibility, we first check if cluster properties are defined and
     // use those as the source cluster. This is going to be wrong in many
     // cases if the eventlogs passed in are not all actually run on the same cluster
@@ -331,11 +333,13 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
     if (clusterProperties.isDefined) {
       StringUtils.convertToMB(clusterProperties.get.system.getMemory)
     } else if (clusterInfoFromEventLog.isDefined) {
-      val numExecutorsPerNode = clusterInfoFromEventLog.map(_.numExecsPerNode)
-        .getOrElse(1).toLong
+      // TODO: Incase of dynamic allocation, this calculation is wrong as
+      //       the value can be -1.
+      // val numExecutorsPerNode = clusterInfoFromEventLog.map(_.numExecsPerNode)
+      //  .getOrElse(1).toLong
       val heapMemMB = clusterInfoFromEventLog.get.executorHeapMemory
       val overheadMemMB = getExecutorOverheadMemoryMB(sparkProperties)
-      (heapMemMB + overheadMemMB) * numExecutorsPerNode
+      (heapMemMB + overheadMemMB) * numExecsPerNode
     } else {
       // we don't know
       0L
@@ -398,6 +402,110 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
    */
   def getGPUInstanceTypeRecommendation(
       sparkProperties: Map[String, String]): Option[RecommendedClusterInfo] = {
+    // Get basic cluster information
+    val vendor = clusterInfoFromEventLog.map(_.vendor).getOrElse("")
+    val numExecutors = getNumExecutorInstances(sparkProperties)
+
+    // Calculate executors per node
+    val origNumExecsPerNode = clusterInfoFromEventLog.map(_.numExecsPerNode).getOrElse(1)
+    val numExecsPerNode = if (clusterProperties.isEmpty) {
+      // numExecsPerNode can be -1 if dynamic allocation. However, if we are on
+      // a CSP then we want to recommend the best size machine so use the
+      // number of GPUs as proxy to be the number of executors we could put on a node.
+      if (origNumExecsPerNode == -1) {
+        maxGpusSupported
+      }  else {
+        origNumExecsPerNode
+      }
+    } else {
+      // TODO: Why not use maxGpusSupported here?
+      1
+    }
+
+    // Calculate GPUs to use
+    val gpusToUse = Math.max(numGpus, Math.min(numExecsPerNode, maxGpusSupported))
+    this.numGpus = gpusToUse // Update global state
+
+    // Calculate cores per executor
+    val coresPerExecutor = if (clusterProperties.isDefined) {
+      // I guess the assumption here is 1 executor per node - or we need to look this up
+      // since not in the cluster definition, either way this is number cores per node
+      logDebug("Using the cluster properties passed in.")
+      clusterProperties.get.system.getNumCores / gpusToUse
+    } else if (clusterInfoFromEventLog.isDefined) {
+      // this assumes this job filled an entire node, which may not be true on
+      // a multiple tenant cluster. If the number of executors ran per node would
+      // require multiple GPUs per node check to see if this platform supports it.
+      // If it doesn't we need to increase the number of nodes recommended.
+      logDebug("Using the cluster information from the event log.")
+      clusterInfoFromEventLog.get.coresPerExecutor
+    } else {
+      // shouldn't ever happen
+      logError("Cluster properties wasn't specified and cluster information couldn't be " +
+        "inferred from the event log!")
+      0
+    }
+
+    val totalCoreCount = coresPerExecutor * numExecutors
+
+    // Calculate instance information
+    val finalCoresPerExec = Math.max(coresPerExecutor,
+      Math.min(totalCoreCount, MIN_CORES_PER_EXEC))
+    val finalNumExecutors = Math.ceil(totalCoreCount.toDouble / finalCoresPerExec).toInt
+    val finalCoresPerNode = finalCoresPerExec * gpusToUse
+
+    val instanceInfo = getInstanceByResources(finalCoresPerNode, gpusToUse).orElse {
+      // if the instance info isn't found, like onprem or some platform we don't know about
+      val nodeMemMB = getMemoryMBPerNode(sparkProperties, numExecsPerNode)
+      // It's possible if a cpu run was used, it could run with multiple executors, but
+      // if the platform doesn't support multiple GPUs per node then we could recommend
+      // different number of nodes. We have to take this into account for cores and memory
+      // calculations.
+      val ratioExecs = Math.max(1, numExecsPerNode / gpusToUse)
+      val execMem = nodeMemMB / ratioExecs
+      logDebug(s"Creating instance info: execCores=$finalCoresPerExec, execMem=$execMem, " +
+        s"numExecsPerNode=$numExecsPerNode, gpusToUse=$gpusToUse")
+      Some(InstanceInfo(finalCoresPerExec, execMem, PlatformNames.ONPREM, gpusToUse))
+    }
+
+    // Early return if no executors or no instance info
+    if (numExecutors <= 0) {
+      logWarning("No executors so the recommended cluster and node instance information" +
+        " is not set!")
+      return None
+    }
+
+    // Calculate final recommendation
+    instanceInfo.map { instance =>
+      val numNodes = if (vendor == PlatformNames.ONPREM) {
+        // For onprem we cannot recommend the size of the cluster
+        -1
+      } else {
+        math.ceil(finalNumExecutors.toDouble / instance.numGpus).toInt
+      }
+      val dynamicAlloc = Platform.getDynamicAllocationSettings(sparkProperties)
+      val recommendation = RecommendedClusterInfo(
+        vendor = vendor,
+        coresPerExecutor = finalCoresPerExec,
+        numWorkerNodes = numNodes,
+        numGpus = instance.numGpus,
+        numExecutors = finalNumExecutors,
+        gpuDevice = getGpuOrDefault.toString,
+        dynamicAllocationEnabled = dynamicAlloc.enabled,
+        dynamicAllocationMaxExecutors = dynamicAlloc.max,
+        dynamicAllocationMinExecutors = dynamicAlloc.min,
+        dynamicAllocationInitialExecutors = dynamicAlloc.initial,
+        workerNodeType = Some(instance.name)
+      )
+      recommendedNodeInstanceInfo = Some(instance)
+      recommendedClusterInfo = Some(recommendation)
+      recommendation
+    }
+  }
+
+
+  def getGPUInstanceTypeRecommendation2(
+      sparkProperties: Map[String, String]): Option[RecommendedClusterInfo] = {
     val vendor = clusterInfoFromEventLog.map(_.vendor).getOrElse("")
     val numExecs = getNumExecutorInstances(sparkProperties)
     // If the cluster properties were specified make sure to use those and not
@@ -415,6 +523,7 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
         origClusterNumExecsPerNode
       }
     } else {
+      // TODO: Why not use maxGpusSupported here?
       1
     }
     // onprem yarn multi-tenant vs yarn static cluster (dataproc) for just that application
@@ -453,7 +562,7 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
         0
       }
       val nodeCoresToUse = execCores * gpusToUse
-      val nodeMemMB = getMemoryMBPerNode(sparkProperties)
+      val nodeMemMB = getMemoryMBPerNode(sparkProperties, numExecsPerNode)
       // It's possible if a cpu run was used, it could run with multiple executors, but
       // if the platform doesn't support multiple GPUs per node then we could recommend
       // different number of nodes. We have to take this into account for cores and memory
@@ -464,6 +573,7 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
         s"$ratioExecs numExecsPerNode $numExecsPerNode gpusToUse $gpusToUse")
       // here we change instanceInfo to be executor because assumption is it's on prem and we
       // don't know how to recommend node type
+      // TODO: `gpusToUse` should be used below instead of `1` for `numGpus`
       Some(InstanceInfo(nodeCoresToUse, execMem, "onprem", 1))
     } else if (clusterProperties.isDefined) {
       val info = instanceInfoOpt.get
