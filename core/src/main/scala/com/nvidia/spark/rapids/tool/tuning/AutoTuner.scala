@@ -766,7 +766,7 @@ class AutoTuner(
               sparkVersion, platform))
         }
       case None =>
-        Left(autoTunerConfigsProvider.shuffleManagerCommentForMissingVersion)
+        Left(autoTunerConfigsProvider.generalComments("shuffle.manager.version.missing"))
     }
   }
 
@@ -793,8 +793,7 @@ class AutoTuner(
       if ((jvmGCFraction.sum / jvmGCFraction.size) >
         autoTunerConfigsProvider.MAX_JVM_GCTIME_FRACTION) {
         // TODO - or other cores/memory ratio
-        appendComment("Average JVM GC time is very high. " +
-          "Other Garbage Collectors can be used for better performance.")
+        appendComment(autoTunerConfigsProvider.generalComments("gc.algorithm.high"))
       }
     }
   }
@@ -870,10 +869,7 @@ class AutoTuner(
       appendComment("'spark.sql.adaptive.autoBroadcastJoinThreshold' was not set.")
     } else if (autoBroadcastJoinThresholdProperty.get >
         StringUtils.convertToMB(autoTunerConfigsProvider.AQE_AUTOBROADCAST_JOIN_THRESHOLD)) {
-      appendComment("Setting 'spark.sql.adaptive.autoBroadcastJoinThreshold' > " +
-        s"${autoTunerConfigsProvider.AQE_AUTOBROADCAST_JOIN_THRESHOLD} could " +
-        s"lead to performance\n" +
-        "  regression. Should be set to a lower number.")
+      appendComment(autoTunerConfigsProvider.generalComments("aqe.broadcast.threshold"))
     }
   }
 
@@ -884,8 +880,7 @@ class AutoTuner(
   private def recommendSystemProperties(): Unit = {
     appInfoProvider.getSystemProperty("file.encoding").collect {
       case encoding if !ToolUtils.isFileEncodingRecommended(encoding) =>
-        appendComment(s"file.encoding should be [${ToolUtils.SUPPORTED_ENCODINGS.mkString}]" +
-            " because GPU only supports the charset when using some expressions.")
+        appendComment(autoTunerConfigsProvider.generalComments("file.encoding.unsupported"))
     }
   }
 
@@ -990,9 +985,7 @@ class AutoTuner(
         appInfoProvider.getRedundantReadSize >
           autoTunerConfigsProvider.DEF_READ_SIZE_THRESHOLD) {
       appendRecommendation("spark.rapids.filecache.enabled", "true")
-      appendComment("Enable file cache only if Spark local disks bandwidth is > 1 GB/s" +
-        " and you have sufficient disk space available to fit both cache and normal Spark" +
-        " temporary data.")
+      appendComment(autoTunerConfigsProvider.generalComments("file.cache.enabling"))
     }
   }
 
@@ -1031,9 +1024,7 @@ class AutoTuner(
         val shuffleSkewStages = appInfoProvider.getShuffleSkewStages
         if (shuffleSkewStages.exists(id => shuffleStagesWithPosSpilling.contains(id))) {
           appendOptionalComment(lookup,
-            "Shuffle skew exists (when task's Shuffle Read Size > 3 * Avg Stage-level size) in\n" +
-            s"  stages with spilling. Increasing shuffle partitions is not recommended in this\n" +
-            s"  case since keys will still hash to the same task.")
+            autoTunerConfigsProvider.generalComments("shuffle.skew.exists"))
         } else {
            shufflePartitions *= autoTunerConfigsProvider.DEF_SHUFFLE_PARTITION_MULTIPLIER
           // Could be memory instead of partitions
@@ -1078,9 +1069,7 @@ class AutoTuner(
       appendRecommendation("spark.rapids.sql.enabled", "true")
     }
     if (!isPluginLoaded) {
-      appendComment("RAPIDS Accelerator for Apache Spark jar is missing in \"spark.plugins\". " +
-        "Please refer to " +
-        "https://docs.nvidia.com/spark-rapids/user-guide/latest/getting-started/overview.html")
+      appendComment(autoTunerConfigsProvider.generalComments("plugin.jar.missing"))
     }
   }
 
@@ -1257,8 +1246,6 @@ trait AutoTunerConfigsProvider extends Logging {
   val DEF_READ_SIZE_THRESHOLD = 100 * 1024L * 1024L * 1024L
   val DEFAULT_WORKER_INFO_PATH = "./worker_info.yaml"
   val SUPPORTED_SIZE_UNITS: Seq[String] = Seq("b", "k", "m", "g", "t", "p")
-  private val DOC_URL: String = "https://nvidia.github.io/spark-rapids/docs/" +
-    "additional-functionality/advanced_configs.html#advanced-configuration"
   // Value of batchSizeBytes that performs best overall
   val BATCH_SIZE_BYTES = 2147483647
   val AQE_INPUT_SIZE_BYTES_THRESHOLD = 35000
@@ -1269,6 +1256,17 @@ trait AutoTunerConfigsProvider extends Logging {
   val filteredPropKeys: Set[String] = Set(
     "spark.app.id"
   )
+
+  // scalastyle:off line.size.limit
+  private val docUrls: Map[String, String] = Map(
+    "advanced_configuration" ->
+      "https://nvidia.github.io/spark-rapids/docs/additional-functionality/advanced_configs.html#advanced-configuration",
+    "shuffle_manager" ->
+      "https://docs.nvidia.com/spark-rapids/user-guide/latest/additional-functionality/rapids-shuffle.html#rapids-shuffle-manager",
+    "overview" ->
+      "https://docs.nvidia.com/spark-rapids/user-guide/latest/getting-started/overview.html"
+  )
+  // scalastyle:on line.size.limit
 
   val commentsForMissingMemoryProps: Map[String, String] = Map(
     "spark.executor.memory" ->
@@ -1321,6 +1319,32 @@ trait AutoTunerConfigsProvider extends Logging {
         "  distribution, this step is not needed.")
   )
 
+  val generalComments: Map[String, String] = Map(
+    "plugin.jar.missing" ->
+      ("RAPIDS Accelerator for Apache Spark jar is missing in \"spark.plugins\". " +
+        s"Please refer to ${docUrls("overview")}"),
+    "gc.algorithm.high" ->
+      ("Average JVM GC time is very high. Other Garbage Collectors can be " +
+        "used for better performance."),
+    "aqe.broadcast.threshold" ->
+      ("Setting 'spark.sql.adaptive.autoBroadcastJoinThreshold' > " +
+        s"$AQE_AUTOBROADCAST_JOIN_THRESHOLD could lead to performance\n" +
+        "  regression. Should be set to a lower number."),
+    "shuffle.skew.exists" ->
+      ("Shuffle skew exists (when task's Shuffle Read Size > 3 * Avg Stage-level size) in\n" +
+        "  stages with spilling. Increasing shuffle partitions is not recommended in this\n" +
+        "  case since keys will still hash to the same task."),
+    "file.encoding.unsupported" ->
+      (s"file.encoding should be [${ToolUtils.SUPPORTED_ENCODINGS.mkString}]" +
+        " because GPU only supports the charset when using some expressions."),
+    "file.cache.enabling" ->
+      ("Enable file cache only if Spark local disks bandwidth is > 1 GB/s" +
+        " and you have sufficient disk space available to fit both cache and normal Spark" +
+        " temporary data."),
+    "shuffle.manager.version.missing" ->
+      "Could not recommend RapidsShuffleManager as Spark version cannot be determined."
+  )
+
   // Recommended values for specific unsupported configurations
   val recommendationsFromDriverLogs: Map[String, String] = Map(
     "spark.rapids.sql.incompatibleDateFormats.enabled" -> "true"
@@ -1328,14 +1352,11 @@ trait AutoTunerConfigsProvider extends Logging {
 
   def commentForExperimentalConfig(config: String): String = {
     s"Using $config does not guarantee to produce the same results as CPU. " +
-      s"Please refer to $DOC_URL."
+      s"Please refer to ${docUrls("advanced_configuration")}"
   }
 
   // the plugin jar is in the form of rapids-4-spark_scala_binary-(version)-*.jar
   val pluginJarRegEx: Regex = "rapids-4-spark_\\d\\.\\d+-(\\d{2}\\.\\d{2}\\.\\d+).*\\.jar".r
-
-  private val shuffleManagerDocUrl = "https://docs.nvidia.com/spark-rapids/user-guide/latest/" +
-    "additional-functionality/rapids-shuffle.html#rapids-shuffle-manager"
 
   /**
    * Abstract method to create an instance of the AutoTuner.
@@ -1466,13 +1487,9 @@ trait AutoTunerConfigsProvider extends Logging {
        |Cannot recommend RAPIDS Shuffle Manager for unsupported ${platform.sparkVersionLabel}: '$sparkVersion'.
        |To enable RAPIDS Shuffle Manager, use a supported ${platform.sparkVersionLabel} (e.g., '$latestSparkVersion')
        |and set: '--conf spark.shuffle.manager=com.nvidia.spark.rapids.spark$latestSmVersion.RapidsShuffleManager'.
-       |See supported versions: $shuffleManagerDocUrl.
+       |See supported versions: ${docUrls("shuffle_manager")}.
        |""".stripMargin.trim.replaceAll("\n", "\n  ")
     // scalastyle:on line.size.limit
-  }
-
-  def shuffleManagerCommentForMissingVersion: String = {
-    "Could not recommend RapidsShuffleManager as Spark version cannot be determined."
   }
 }
 
