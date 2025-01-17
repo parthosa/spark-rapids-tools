@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2025, NVIDIA CORPORATION.
+ * Copyright (c) 2022-2025, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -463,13 +463,11 @@ class AutoTuner(
   }
 
   /**
-   * Recommendation for 'spark.task.resource.gpu.amount' based on num of cpu cores.
+   * Recommended value for 'spark.task.resource.gpu.amount'.
+   *
+   * Set to `0.01` for Spark RAPIDS as task parallelism will be honoured by `spark.executor.cores`.
    */
-  def calcTaskGPUAmount: Double = {
-    val numExecutorCores = calcNumExecutorCores
-    // can never be 0 since numExecutorCores has to be at least 1
-    1.0 / numExecutorCores
-  }
+  private val recommendedTaskGPUAmount: Double = 0.01
 
   /**
    * Recommendation for 'spark.rapids.sql.concurrentGpuTasks' based on gpu memory.
@@ -667,7 +665,7 @@ class AutoTuner(
     // specific recommendations
     if (platform.recommendedClusterInfo.isDefined) {
       val execCores = platform.recommendedClusterInfo.map(_.coresPerExecutor).getOrElse(1)
-      appendRecommendation("spark.task.resource.gpu.amount", calcTaskGPUAmount)
+      appendRecommendation("spark.task.resource.gpu.amount", recommendedTaskGPUAmount)
       appendRecommendation("spark.rapids.sql.concurrentGpuTasks",
         calcGpuConcTasks().toInt)
       val availableMemPerExec =
