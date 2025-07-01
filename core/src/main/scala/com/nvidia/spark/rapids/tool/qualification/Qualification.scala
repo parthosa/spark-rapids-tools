@@ -21,7 +21,7 @@ import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import scala.collection.JavaConverters._
 
 import com.nvidia.spark.rapids.tool.{EventLogInfo, FailedEventLog, PlatformFactory, ToolBase}
-import com.nvidia.spark.rapids.tool.tuning.{ClusterProperties, TunerContext}
+import com.nvidia.spark.rapids.tool.tuning.{ClusterProperties, TargetClusterProps, TunerContext}
 import com.nvidia.spark.rapids.tool.views.QualRawReportGenerator
 import org.apache.hadoop.conf.Configuration
 
@@ -36,7 +36,8 @@ class Qualification(outputPath: String, numRows: Int, hadoopConf: Configuration,
     printStdout: Boolean, enablePB: Boolean,
     reportSqlLevel: Boolean, maxSQLDescLength: Int, mlOpsEnabled: Boolean,
     penalizeTransitions: Boolean, tunerContext: Option[TunerContext],
-    clusterReport: Boolean, platformArg: String, workerInfoPath: Option[String])
+    clusterReport: Boolean, platformArg: String, workerInfoPath: Option[String],
+    targetClusterInfoPath: Option[String])
   extends ToolBase(timeout) {
 
   override val simpleName: String = "qualTool"
@@ -118,7 +119,9 @@ class Qualification(outputPath: String, numRows: Int, hadoopConf: Configuration,
       val platform = {
         val clusterPropsOpt = workerInfoPath.flatMap(
           PropertiesLoader[ClusterProperties].loadFromFile)
-        PlatformFactory.createInstance(platformArg, clusterPropsOpt)
+        val targetClusterPropsOpt = targetClusterInfoPath.flatMap(
+          PropertiesLoader[TargetClusterProps].loadFromFile)
+        PlatformFactory.createInstance(platformArg, clusterPropsOpt, targetClusterPropsOpt)
       }
       val appResult = QualificationAppInfo.createApp(path, hadoopConf, pluginTypeChecker,
         reportSqlLevel, mlOpsEnabled, penalizeTransitions, platform)

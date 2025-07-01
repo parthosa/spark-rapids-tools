@@ -122,7 +122,8 @@ object QualificationMain extends Logging {
     val qual = new Qualification(outputDirectory, numOutputRows, hadoopConf, timeout,
       nThreads, order, pluginTypeChecker, reportReadSchema, printStdout,
       enablePB, reportSqlLevel, maxSQLDescLength, mlOpsEnabled, penalizeTransitions,
-      tunerContext, appArgs.clusterReport(), appArgs.platform(), appArgs.workerInfo.toOption)
+      tunerContext, appArgs.clusterReport(), appArgs.platform(), appArgs.workerInfo.toOption,
+      appArgs.targetClusterInfo.toOption)
     val res = qual.qualifyApps(filteredLogs)
     (0, res)
   }
