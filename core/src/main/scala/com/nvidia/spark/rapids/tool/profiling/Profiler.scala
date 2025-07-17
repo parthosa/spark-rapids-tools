@@ -22,7 +22,7 @@ import scala.collection.JavaConverters._
 import scala.util.control.NonFatal
 
 import com.nvidia.spark.rapids.tool.{AppSummaryInfoBaseProvider, EventLogInfo, EventLogPathProcessor, FailedEventLog, PlatformFactory, ToolBase}
-import com.nvidia.spark.rapids.tool.tuning.{AutoTuner, ClusterProperties, ProfilingAutoTunerConfigsProvider, TargetClusterProps, TuningEntryTrait}
+import com.nvidia.spark.rapids.tool.tuning.{AutoTuner, ClusterProperties, ProfilingAutoTunerHelper, TargetClusterProps, TuningEntryTrait}
 import com.nvidia.spark.rapids.tool.views._
 import org.apache.hadoop.conf.Configuration
 
@@ -329,7 +329,7 @@ class Profiler(hadoopConf: Configuration, appArgs: ProfileArgs, enablePB: Boolea
         throw new IllegalStateException("Profiling AutoTuner requires a platform. " +
           "Please provide a valid platform using --platform option.")
       }
-      val autoTuner: AutoTuner = ProfilingAutoTunerConfigsProvider.buildAutoTuner(appInfoProvider,
+      val autoTuner: AutoTuner = ProfilingAutoTunerHelper.buildAutoTuner(appInfoProvider,
         platform, driverInfoProvider)
 
       // The autotuner allows skipping some properties,

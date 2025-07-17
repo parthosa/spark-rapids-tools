@@ -31,7 +31,7 @@ class QualificationAutoTuner(
     platform: Platform,
     driverInfoProvider: DriverLogInfoProvider)
   extends AutoTuner(clusterProps, appInfoProvider, platform, driverInfoProvider,
-    QualificationAutoTunerConfigsProvider) {
+    QualificationAutoTunerHelper) {
 
   /**
    * List of recommendations for which the Qualification AutoTuner skips calculations and only
@@ -45,12 +45,7 @@ class QualificationAutoTuner(
 /**
  * Provides configuration settings for the Qualification Tool's AutoTuner
  */
-object QualificationAutoTunerConfigsProvider extends AutoTunerConfigsProvider {
-
-  // For qualification tool's auto-tuner, the batch size to be recommended is 1GB
-  // See https://github.com/NVIDIA/spark-rapids-tools/issues/1399
-  override val BATCH_SIZE_BYTES = 1073741824
-
+object QualificationAutoTunerHelper extends AutoTunerHelper {
   /**
    * For the Qualification Tool's recommendation for cluster sizing, we want to keep
    * the total number of CPU cores between the source and target clusters constant.

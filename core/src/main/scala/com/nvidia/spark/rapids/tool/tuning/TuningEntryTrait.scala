@@ -128,6 +128,10 @@ trait TuningEntryTrait {
     updateOpType()
   }
 
+  def isMissing(): Boolean = {
+    originalValue.isEmpty && tunedValue.isEmpty
+  }
+
   /**
    * Indicates if the property is tuned. This is used to filter out the entries that stayed the
    * same.

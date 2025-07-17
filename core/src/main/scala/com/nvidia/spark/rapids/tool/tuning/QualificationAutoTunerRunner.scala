@@ -66,7 +66,7 @@ class QualificationAutoTunerRunner(val appInfoProvider: QualAppSummaryInfoProvid
 
   def runAutoTuner(platform: Platform): TuningResult = {
     val autoTuner: AutoTuner =
-      QualificationAutoTunerConfigsProvider.buildAutoTuner(appInfoProvider, platform)
+      QualificationAutoTunerHelper.buildAutoTuner(appInfoProvider, platform)
     val (recommendations, comments) =
       autoTuner.getRecommendedProperties(showOnlyUpdatedProps =
         QualificationAutoTunerRunner.filterByUpdatedPropsEnabled)

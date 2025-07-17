@@ -22,7 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.nvidia.spark.rapids.tool.profiling.ProfileArgs
 import com.nvidia.spark.rapids.tool.qualification.QualOutputWriter
-import com.nvidia.spark.rapids.tool.tuning.{DriverInfo, GpuWorkerProps, SparkProperties, TargetClusterProps, TuningEntryDefinition, WorkerInfo}
+import com.nvidia.spark.rapids.tool.tuning.{DriverInfo, GpuWorkerProps, SparkProperties, TargetClusterProps, TuningConfigEntry, TuningConfigsProvider, TuningEntryDefinition, WorkerInfo}
 import org.apache.hadoop.fs.Path
 import org.yaml.snakeyaml.{DumperOptions, Yaml}
 import scala.collection.mutable.ArrayBuffer
@@ -214,8 +214,8 @@ object ToolTestUtils extends Logging {
       gpuDevice: Option[String] = None,
       enforcedSparkProperties: Map[String, String] = Map.empty,
       tuningDefinitions: java.util.List[TuningEntryDefinition] =
-        new java.util.ArrayList[TuningEntryDefinition]()):
-    TargetClusterProps = {
+        new java.util.ArrayList[TuningEntryDefinition](),
+      defaultTuningConfigs: Seq[TuningConfigEntry] = Seq.empty): TargetClusterProps = {
     val driverProps = new DriverInfo(driverNodeInstanceType.getOrElse(""))
     import scala.collection.JavaConverters._
     val gpuWorkerProps = new GpuWorkerProps(
@@ -225,7 +225,9 @@ object ToolTestUtils extends Logging {
     val sparkProps = new SparkProperties()
     sparkProps.getEnforced.putAll(enforcedSparkProperties.asJava)
     sparkProps.setTuningDefinitions(tuningDefinitions)
-    new TargetClusterProps(driverProps, workerProps, sparkProps)
+    val tuningConfigs = new TuningConfigsProvider()
+    tuningConfigs.getDefault.addAll(defaultTuningConfigs.asJava)
+    new TargetClusterProps(driverProps, workerProps, sparkProps, tuningConfigs)
   }
 
   def buildTargetClusterInfoAsString(

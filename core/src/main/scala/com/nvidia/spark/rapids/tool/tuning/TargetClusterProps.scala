@@ -184,9 +184,11 @@ class SparkProperties(
 class TargetClusterProps (
   @BeanProperty var driverInfo: DriverInfo,
   @BeanProperty var workerInfo: WorkerInfo,
-  @BeanProperty var sparkProperties: SparkProperties) extends ValidatableProperties {
+  @BeanProperty var sparkProperties: SparkProperties,
+  @BeanProperty var tuningConfigs: TuningConfigsProvider) extends ValidatableProperties {
 
-  def this() = this(new DriverInfo(), new WorkerInfo(), new SparkProperties())
+  def this() = this(new DriverInfo(), new WorkerInfo(), new SparkProperties(),
+    new TuningConfigsProvider())
 
   override def validate(): Unit = {
     workerInfo.validate()

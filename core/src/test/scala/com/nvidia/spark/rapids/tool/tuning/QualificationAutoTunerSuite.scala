@@ -39,7 +39,7 @@ import org.apache.spark.sql.rapids.tool.util.{FSUtils, PropertiesLoader}
 class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
 
   val qualLogDir: String = ToolTestUtils.getTestResourcePath("spark-events-qualification")
-  val autoTunerConfigsProvider: AutoTunerConfigsProvider = QualificationAutoTunerConfigsProvider
+  val autoTunerHelper: AutoTunerHelper = QualificationAutoTunerHelper
 
   /**
    * Default Spark properties to be used when building the Qualification AutoTuner
@@ -134,10 +134,10 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
         "--conf spark.executor.memory=[FILL_IN_VALUE]",
         "--conf spark.executor.memoryOverhead=[FILL_IN_VALUE]",
         "--conf spark.rapids.memory.pinnedPool.size=[FILL_IN_VALUE]",
-        s"- ${ProfilingAutoTunerConfigsProvider.notEnoughMemCommentForKey("spark.executor.memory")}",
-        s"- ${ProfilingAutoTunerConfigsProvider.notEnoughMemCommentForKey("spark.executor.memoryOverhead")}",
-        s"- ${ProfilingAutoTunerConfigsProvider.notEnoughMemCommentForKey("spark.rapids.memory.pinnedPool.size")}",
-        s"- ${QualificationAutoTunerConfigsProvider.notEnoughMemComment(40140)}"
+        s"- ${ProfilingAutoTunerHelper.notEnoughMemCommentForKey("spark.executor.memory")}",
+        s"- ${ProfilingAutoTunerHelper.notEnoughMemCommentForKey("spark.executor.memoryOverhead")}",
+        s"- ${ProfilingAutoTunerHelper.notEnoughMemCommentForKey("spark.rapids.memory.pinnedPool.size")}",
+        s"- ${QualificationAutoTunerHelper.notEnoughMemComment(40140)}"
       )),
     ("sufficient memory available for executors",
       "44g",
@@ -280,12 +280,12 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
             |--conf spark.task.resource.gpu.amount=0.001
             |
             |Comments:
-            |- ${ProfilingAutoTunerConfigsProvider.getEnforcedPropertyComment("spark.executor.cores")}
-            |- ${ProfilingAutoTunerConfigsProvider.getEnforcedPropertyComment("spark.executor.instances")}
+            |- ${ProfilingAutoTunerHelper.getEnforcedPropertyComment("spark.executor.cores")}
+            |- ${ProfilingAutoTunerHelper.getEnforcedPropertyComment("spark.executor.instances")}
             |- 'spark.rapids.memory.pinnedPool.size' was not set.
             |- 'spark.rapids.shuffle.multiThreaded.reader.threads' was not set.
             |- 'spark.rapids.shuffle.multiThreaded.writer.threads' was not set.
-            |- ${ProfilingAutoTunerConfigsProvider.getEnforcedPropertyComment("spark.rapids.sql.batchSizeBytes")}
+            |- ${ProfilingAutoTunerHelper.getEnforcedPropertyComment("spark.rapids.sql.batchSizeBytes")}
             |- 'spark.rapids.sql.concurrentGpuTasks' was not set.
             |- 'spark.rapids.sql.multiThreadedRead.numThreads' was not set.
             |- 'spark.shuffle.manager' was not set.
@@ -293,8 +293,8 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
             |- 'spark.sql.files.maxPartitionBytes' was not set.
             |- 'spark.task.resource.gpu.amount' was not set.
             |- RAPIDS Accelerator for Apache Spark jar is missing in "spark.plugins". Please refer to https://docs.nvidia.com/spark-rapids/user-guide/latest/getting-started/overview.html
-            |- ${ProfilingAutoTunerConfigsProvider.classPathComments("rapids.jars.missing")}
-            |- ${ProfilingAutoTunerConfigsProvider.classPathComments("rapids.shuffle.jars")}
+            |- ${ProfilingAutoTunerHelper.classPathComments("rapids.jars.missing")}
+            |- ${ProfilingAutoTunerHelper.classPathComments("rapids.shuffle.jars")}
             |""".stripMargin.trim
       // scalastyle:on line.size.limit
       compareOutput(expectedResults, actualTuningResults)

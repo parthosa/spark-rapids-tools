@@ -96,7 +96,7 @@ abstract class BaseAutoTunerSuite extends FunSuite with BeforeAndAfterEach with 
   // RapidsShuffleManager version used for testing Databricks
   def testSmVersionDatabricks: String = "332db"
   //  Subclasses to provide the AutoTuner configuration to use
-  val autoTunerConfigsProvider: AutoTunerConfigsProvider
+  val autoTunerHelper: AutoTunerHelper
 
   val defaultDataprocProps: mutable.Map[String, String] = {
     mutable.LinkedHashMap[String, String](
@@ -227,7 +227,7 @@ abstract class BaseAutoTunerSuite extends FunSuite with BeforeAndAfterEach with 
     mockInfoProvider.setSparkMaster(mockSparkMasterStr)
 
     // Build and return the AutoTuner
-    autoTunerConfigsProvider.buildAutoTunerFromProps(
+    autoTunerHelper.buildAutoTunerFromProps(
       clusterProps, mockInfoProvider, platform)
   }
 
