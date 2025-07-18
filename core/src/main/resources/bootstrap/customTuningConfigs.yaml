@@ -1,0 +1,14 @@
+default:
+  - name: CONC_GPU_TASKS
+    description: "Maximum number of concurrent GPU tasks"
+    default: ""
+    min: ""
+    max: "1"
+  - name: HEAP_PER_CORE
+    description: "Heap memory per core"
+    default: "1g"
+    min: ""
+    max: ""
+
+qualification: []
+profiling: []

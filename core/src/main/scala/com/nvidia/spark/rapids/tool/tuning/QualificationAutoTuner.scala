@@ -29,9 +29,10 @@ class QualificationAutoTuner(
     clusterProps: ClusterProperties,
     appInfoProvider: AppSummaryInfoBaseProvider,
     platform: Platform,
-    driverInfoProvider: DriverLogInfoProvider)
+    driverInfoProvider: DriverLogInfoProvider,
+    userProvidedTuningConfigs: Option[TuningConfigsProvider])
   extends AutoTuner(clusterProps, appInfoProvider, platform, driverInfoProvider,
-    QualificationAutoTunerHelper) {
+    userProvidedTuningConfigs, QualificationAutoTunerHelper) {
 
   /**
    * List of recommendations for which the Qualification AutoTuner skips calculations and only
@@ -57,10 +58,11 @@ object QualificationAutoTunerHelper extends AutoTunerHelper {
       clusterProps: ClusterProperties,
       appInfoProvider: AppSummaryInfoBaseProvider,
       platform: Platform,
-      driverInfoProvider: DriverLogInfoProvider): AutoTuner = {
+      driverInfoProvider: DriverLogInfoProvider,
+      userProvidedTuningConfigs: Option[TuningConfigsProvider]): AutoTuner = {
     // TODO: This should be refactored to ensure only instance of `QualAppSummaryInfoProvider`
     //       passed to the `QualificationAutoTuner` instance.
     new QualificationAutoTuner(
-      clusterProps, appInfoProvider, platform, driverInfoProvider)
+      clusterProps, appInfoProvider, platform, driverInfoProvider, userProvidedTuningConfigs)
   }
 }

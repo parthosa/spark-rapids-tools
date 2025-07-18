@@ -85,7 +85,8 @@ class AppInfoProviderMockTest(val maxInput: Double,
 /**
  * Base class for AutoTuner test suites
  */
-abstract class BaseAutoTunerSuite extends FunSuite with BeforeAndAfterEach with Logging {
+abstract class BaseAutoTunerSuite extends FunSuite with BeforeAndAfterEach
+  with Logging with AutoTunerStaticComments {
 
   // Spark runtime version used for testing
   def testSparkVersion: String = ToolUtils.sparkRuntimeVersion

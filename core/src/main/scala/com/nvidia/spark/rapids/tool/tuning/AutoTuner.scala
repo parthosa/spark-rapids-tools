@@ -329,13 +329,23 @@ abstract class AutoTuner(
     val appInfoProvider: AppSummaryInfoBaseProvider,
     val platform: Platform,
     val driverInfoProvider: DriverLogInfoProvider,
-    val autoTunerHelper: AutoTunerHelper) extends Logging {
+    val userProvidedTuningConfigs: Option[TuningConfigsProvider],
+    val autoTunerHelper: AutoTunerHelper)
+  extends Logging with AutoTunerCommentsWithTuningConfigs with AutoTunerStaticComments {
 
   lazy val tuningConfigs: TuningConfigsProvider = {
-    // Override the default tuning configs with the target cluster tuning configs if any.
-    platform.targetCluster.foreach(tc => autoTunerHelper.tuningConfigs.merge(tc.tuningConfigs))
-    autoTunerHelper.tuningConfigs
+    // Load the default configs from the resource file (including tool-specific overrides).
+    val baseConfigs = PropertiesLoader[TuningConfigsProvider].loadFromContent(
+        UTF8Source.fromResource(TuningConfigsProvider.DEFAULT_CONFIGS_FILE).mkString
+      ).getOrElse {
+        throw new RuntimeException(
+          "Failed to load default value for tuning config: " +
+            "The file is missing or has invalid format.")
+      }.withTool(Some(this))
+    // Merge with user provided configs if any.
+    userProvidedTuningConfigs.map(baseConfigs.merge).getOrElse(baseConfigs)
   }
+
   var comments = new mutable.ListBuffer[String]()
   var recommendations: mutable.LinkedHashMap[String, TuningEntryTrait] =
     mutable.LinkedHashMap[String, TuningEntryTrait]()
@@ -404,7 +414,7 @@ abstract class AutoTuner(
         val recomRecord = recommendations.getOrElseUpdate(key,
           TuningEntry.build(key, getPropertyValueFromSource(key), None, finalTuningTable.get(key)))
         recomRecord.setRecommendedValue(value)
-        appendComment(autoTunerHelper.getEnforcedPropertyComment(key))
+        appendComment(getEnforcedPropertyComment(key))
     }
   }
 
@@ -599,7 +609,7 @@ abstract class AutoTuner(
       (executorHeap + finalExecutorMemOverhead + sparkOffHeapMemMB + pySparkMemMB) /
         platform.fractionOfSystemMemoryForExecutors
       ).toLong
-    autoTunerHelper.notEnoughMemComment(minTotalExecMemRequired)
+    notEnoughMemComment(minTotalExecMemRequired)
   }
 
   // scalastyle:off line.size.limit
@@ -845,15 +855,15 @@ abstract class AutoTuner(
             // Not enough memory available, add warning comments
             appendComment(notEnoughMemComment)
             appendComment("spark.rapids.memory.pinnedPool.size",
-              autoTunerHelper.notEnoughMemCommentForKey(
+              notEnoughMemCommentForKey(
                 "spark.rapids.memory.pinnedPool.size"))
             if (sparkMaster.contains(Yarn) || sparkMaster.contains(Kubernetes)) {
               appendComment("spark.executor.memoryOverhead",
-                autoTunerHelper.notEnoughMemCommentForKey(
+                notEnoughMemCommentForKey(
                   "spark.executor.memoryOverhead"))
             }
             appendComment("spark.executor.memory",
-              autoTunerHelper.notEnoughMemCommentForKey(
+              notEnoughMemCommentForKey(
                 "spark.executor.memory"))
             false
         }
@@ -882,7 +892,7 @@ abstract class AutoTuner(
       case Right(smClassName) => appendRecommendation("spark.shuffle.manager", smClassName)
       case Left(comment) => appendComment("spark.shuffle.manager", comment)
     }
-    appendComment(autoTunerHelper.classPathComments("rapids.shuffle.jars"))
+    appendComment(classPathComments("rapids.shuffle.jars"))
     recommendFileCache()
     recommendMaxPartitionBytes()
     recommendShufflePartitions()
@@ -947,11 +957,11 @@ abstract class AutoTuner(
           case Some(smVersion) =>
             Right(autoTunerHelper.buildShuffleManagerClassName(smVersion))
           case None =>
-            Left(autoTunerHelper.shuffleManagerCommentForUnsupportedVersion(
+            Left(shuffleManagerCommentForUnsupportedVersion(
               sparkVersion, platform))
         }
       case None =>
-        Left(autoTunerHelper.shuffleManagerCommentForMissingVersion)
+        Left(shuffleManagerCommentForMissingVersion)
     }
   }
 
@@ -990,7 +1000,7 @@ abstract class AutoTuner(
       .getOrElse("false").toLowerCase
     if (aqeEnabled == "false") {
       // TODO: Should we recommend enabling AQE if not set?
-      appendComment(autoTunerHelper.commentsForMissingProps("spark.sql.adaptive.enabled"))
+      appendComment(commentsForMissingProps("spark.sql.adaptive.enabled"))
     }
     appInfoProvider.getSparkVersion match {
       case Some(version) =>
@@ -1104,8 +1114,8 @@ abstract class AutoTuner(
    * 4- If there is a new release recommend that to the user
    */
   private def recommendClassPathEntries(): Unit = {
-    val missingRapidsJarsEntry = autoTunerHelper.classPathComments("rapids.jars.missing")
-    val multipleRapidsJarsEntry = autoTunerHelper.classPathComments("rapids.jars.multiple")
+    val missingRapidsJarsEntry = classPathComments("rapids.jars.missing")
+    val multipleRapidsJarsEntry = classPathComments("rapids.jars.multiple")
 
     appInfoProvider.getRapidsJars match {
       case Seq() =>
@@ -1284,7 +1294,7 @@ abstract class AutoTuner(
       autoTunerHelper.unsupportedOperatorRecommendations.collect {
         case (config, recommendedValue) if operatorReason.contains(config) =>
           appendRecommendation(config, recommendedValue)
-          appendComment(autoTunerHelper.commentForExperimentalConfig(config))
+          appendComment(commentForExperimentalConfig(config))
       }
     }
   }
@@ -1340,7 +1350,7 @@ abstract class AutoTuner(
   private def addDefaultComments(): Unit = {
     appendComment("Could not infer the cluster configuration, recommendations " +
       "are generated using default values!")
-    autoTunerHelper.commentsForMissingProps.foreach {
+    commentsForMissingProps.foreach {
       case (key, value) =>
         if (!skippedRecommendations.contains(key)) {
           appendComment(value)
@@ -1349,7 +1359,7 @@ abstract class AutoTuner(
   }
 
   private def addMissingMemoryComments(): Unit = {
-    autoTunerHelper.commentsForMissingMemoryProps.foreach {
+    commentsForMissingMemoryProps.foreach {
       case (key, value) =>
         if (!skippedRecommendations.contains(key)) {
           appendComment(value)
@@ -1507,9 +1517,10 @@ class ProfilingAutoTuner(
     clusterProps: ClusterProperties,
     appInfoProvider: BaseProfilingAppSummaryInfoProvider,
     platform: Platform,
-    driverInfoProvider: DriverLogInfoProvider)
+    driverInfoProvider: DriverLogInfoProvider,
+    userProvidedTuningConfigs: Option[TuningConfigsProvider])
   extends AutoTuner(clusterProps, appInfoProvider, platform, driverInfoProvider,
-    ProfilingAutoTunerHelper) {
+    userProvidedTuningConfigs, ProfilingAutoTunerHelper) {
 
   /**
    * Overrides the calculation for 'spark.sql.files.maxPartitionBytes'.
@@ -1564,23 +1575,9 @@ class ProfilingAutoTuner(
 }
 
 /**
- * Trait defining configuration defaults and parameters for the AutoTuner.
+ * Helper trait for the AutoTuner
  */
 trait AutoTunerHelper extends Logging {
-
-  // Load the default tuning configurations from the resource file.
-  val tuningConfigs: TuningConfigsProvider = {
-    val tuningConfigs = PropertiesLoader[TuningConfigsProvider].loadFromContent(
-        UTF8Source.fromResource(TuningConfigsProvider.DEFAULT_CONFIGS_FILE).mkString)
-      .getOrElse {
-        throw new RuntimeException("Failed to load default value for tuning config:" +
-          " The file is missing or has invalid format.")
-      }
-    // Set the helper type to get tool-specific configs
-    tuningConfigs.setAutoTunerHelper(this)
-    tuningConfigs
-  }
-
   /**
    * Default strategy for cluster shape recommendation.
    * See [[com.nvidia.spark.rapids.tool.ClusterSizingStrategy]] for different strategies.
@@ -1589,51 +1586,6 @@ trait AutoTunerHelper extends Logging {
   // the plugin jar is in the form of rapids-4-spark_scala_binary-(version)-*.jar
   lazy val pluginJarRegEx: Regex = "rapids-4-spark_\\d\\.\\d+-(\\d{2}\\.\\d{2}\\.\\d+).*\\.jar".r
   lazy val gpuKryoRegistratorClassName = "com.nvidia.spark.rapids.GpuKryoRegistrator"
-  // scalastyle:off line.size.limit
-  private lazy val advancedConfigDocUrl = "https://nvidia.github.io/spark-rapids/docs/additional-functionality/advanced_configs.html#advanced-configuration"
-  private lazy val shuffleManagerDocUrl = "https://docs.nvidia.com/spark-rapids/user-guide/latest/additional-functionality/rapids-shuffle.html#rapids-shuffle-manager"
-
-  // scalastyle:off line.size.limit
-  val commentsForMissingMemoryProps: Map[String, String] = Map(
-    "spark.executor.memory" ->
-      s"'spark.executor.memory' should be set to at least ${tuningConfigs.getEntry("HEAP_PER_CORE").getDefault}/core.",
-    "spark.rapids.memory.pinnedPool.size" ->
-      s"'spark.rapids.memory.pinnedPool.size' should be set to ${tuningConfigs.getEntry("PINNED_MEMORY").getDefault}.")
-
-  val commentsForMissingProps: Map[String, String] = Map(
-    "spark.executor.cores" ->
-      // TODO: This could be extended later to be platform specific.
-      s"'spark.executor.cores' should be set to ${tuningConfigs.getEntry("CORES_PER_EXECUTOR").getDefault}.",
-    "spark.executor.instances" ->
-      "'spark.executor.instances' should be set to (cpuCoresPerNode * numWorkers) / 'spark.executor.cores'.",
-    "spark.task.resource.gpu.amount" ->
-      s"'spark.task.resource.gpu.amount' should be set to ${tuningConfigs.getEntry("TASK_GPU_RESOURCE_AMT").getDefault}.",
-    "spark.rapids.sql.concurrentGpuTasks" ->
-      s"'spark.rapids.sql.concurrentGpuTasks' should be set to Min(${tuningConfigs.getEntry("CONC_GPU_TASKS").getMax.toLong}, (gpuMemory / ${tuningConfigs.getEntry("GPU_MEM_PER_TASK").getDefault})).",
-    "spark.rapids.sql.enabled" ->
-      "'spark.rapids.sql.enabled' should be true to enable SQL operations on the GPU.",
-    "spark.sql.adaptive.enabled" ->
-      "'spark.sql.adaptive.enabled' should be enabled for better performance."
-  ) ++ commentsForMissingMemoryProps
-  // scalastyle:off line.size.limit
-
-  val classPathComments: Map[String, String] = Map(
-    "rapids.jars.missing" ->
-      ("RAPIDS Accelerator for Apache Spark plugin jar is missing\n" +
-        "  from the classpath entries.\n" +
-        "  If the Spark RAPIDS jar is being bundled with your\n" +
-        "  Spark distribution, this step is not needed."),
-    "rapids.jars.multiple" ->
-      ("Multiple RAPIDS Accelerator for Apache Spark plugin jar\n" +
-        "  exist on the classpath.\n" +
-        "  Make sure to keep only a single jar."),
-    "rapids.shuffle.jars" ->
-      ("The RAPIDS Shuffle Manager requires spark.driver.extraClassPath\n" +
-        "  and spark.executor.extraClassPath settings to include the\n" +
-        "  path to the Spark RAPIDS plugin jar.\n" +
-        "  If the Spark RAPIDS jar is being bundled with your Spark\n" +
-        "  distribution, this step is not needed.")
-  )
 
   // Recommended values for specific unsupported configurations
   lazy val unsupportedOperatorRecommendations: Map[String, String] = Map(
@@ -1647,16 +1599,18 @@ trait AutoTunerHelper extends Logging {
     clusterProps: ClusterProperties,
     appInfoProvider: AppSummaryInfoBaseProvider,
     platform: Platform,
-    driverInfoProvider: DriverLogInfoProvider): AutoTuner
+    driverInfoProvider: DriverLogInfoProvider,
+    userProvidedTuningConfigs: Option[TuningConfigsProvider]): AutoTuner
 
   def handleException(
       ex: Throwable,
       appInfo: AppSummaryInfoBaseProvider,
       platform: Platform,
-      driverInfoProvider: DriverLogInfoProvider): AutoTuner = {
+      driverInfoProvider: DriverLogInfoProvider,
+      userProvidedTuningConfigs: Option[TuningConfigsProvider]): AutoTuner = {
     logError("Exception: " + ex.getStackTrace.mkString("Array(", ", ", ")"))
     val tuning = createAutoTunerInstance(new ClusterProperties(), appInfo,
-      platform, driverInfoProvider)
+      platform, driverInfoProvider, userProvidedTuningConfigs)
     val msg = ex match {
       case cEx: ConstructorException => cEx.getContext
       case _ => if (ex.getCause != null) ex.getCause.toString else ex.toString
@@ -1680,49 +1634,101 @@ trait AutoTunerHelper extends Logging {
       clusterProps: String,
       singleAppProvider: AppSummaryInfoBaseProvider,
       platform: Platform = PlatformFactory.createInstance(clusterProperties = None),
-      driverInfoProvider: DriverLogInfoProvider = BaseDriverLogInfoProvider.noneDriverLog
+      driverInfoProvider: DriverLogInfoProvider = BaseDriverLogInfoProvider.noneDriverLog,
+      userProvidedTuningConfigs: Option[TuningConfigsProvider] = None
   ): AutoTuner = {
     try {
       val clusterPropsOpt = PropertiesLoader[ClusterProperties].loadFromContent(clusterProps)
       createAutoTunerInstance(clusterPropsOpt.getOrElse(new ClusterProperties()),
-        singleAppProvider, platform, driverInfoProvider)
+        singleAppProvider, platform, driverInfoProvider, userProvidedTuningConfigs)
     } catch {
       case NonFatal(e) =>
-        handleException(e, singleAppProvider, platform, driverInfoProvider)
+        handleException(e, singleAppProvider, platform, driverInfoProvider,
+          userProvidedTuningConfigs)
     }
   }
 
   def buildAutoTuner(
       singleAppProvider: AppSummaryInfoBaseProvider,
       platform: Platform,
-      driverInfoProvider: DriverLogInfoProvider = BaseDriverLogInfoProvider.noneDriverLog
+      driverInfoProvider: DriverLogInfoProvider = BaseDriverLogInfoProvider.noneDriverLog,
+      userProvidedTuningConfigs: Option[TuningConfigsProvider] = None
   ): AutoTuner = {
     try {
       val autoT = createAutoTunerInstance(
         platform.clusterProperties.getOrElse(new ClusterProperties()),
-        singleAppProvider, platform, driverInfoProvider)
+        singleAppProvider, platform, driverInfoProvider, userProvidedTuningConfigs)
       autoT
     } catch {
       case NonFatal(e) =>
-        handleException(e, singleAppProvider, platform, driverInfoProvider)
+        handleException(e, singleAppProvider, platform, driverInfoProvider,
+          userProvidedTuningConfigs)
     }
   }
 
   def buildShuffleManagerClassName(smVersion: String): String = {
     s"com.nvidia.spark.rapids.spark$smVersion.RapidsShuffleManager"
   }
+}
+
+/**
+ * Provides configuration settings for the Profiling Tool's AutoTuner. This object is as a concrete
+ * implementation of the `AutoTunerHelper` interface.
+ */
+object ProfilingAutoTunerHelper extends AutoTunerHelper {
+  def createAutoTunerInstance(
+      clusterProps: ClusterProperties,
+      appInfoProvider: AppSummaryInfoBaseProvider,
+      platform: Platform,
+      driverInfoProvider: DriverLogInfoProvider,
+      userProvidedTuningConfigs: Option[TuningConfigsProvider]): AutoTuner = {
+    appInfoProvider match {
+      case profilingAppProvider: BaseProfilingAppSummaryInfoProvider =>
+        new ProfilingAutoTuner(clusterProps, profilingAppProvider, platform,
+          driverInfoProvider, userProvidedTuningConfigs)
+      case _ =>
+        throw new IllegalArgumentException("'appInfoProvider' must be an instance of " +
+          s"${classOf[BaseProfilingAppSummaryInfoProvider]}")
+    }
+  }
+}
+
+/**
+ * Trait providing static comments for the AutoTuner.
+ */
+trait AutoTunerStaticComments {
+  // scalastyle:off line.size.limit
+  private lazy val advancedConfigDocUrl = "https://nvidia.github.io/spark-rapids/docs/additional-functionality/advanced_configs.html#advanced-configuration"
+  private lazy val shuffleManagerDocUrl = "https://docs.nvidia.com/spark-rapids/user-guide/latest/additional-functionality/rapids-shuffle.html#rapids-shuffle-manager"
+
+  val classPathComments: Map[String, String] = Map(
+    "rapids.jars.missing" ->
+      ("RAPIDS Accelerator for Apache Spark plugin jar is missing\n" +
+        "  from the classpath entries.\n" +
+        "  If the Spark RAPIDS jar is being bundled with your\n" +
+        "  Spark distribution, this step is not needed."),
+    "rapids.jars.multiple" ->
+      ("Multiple RAPIDS Accelerator for Apache Spark plugin jar\n" +
+        "  exist on the classpath.\n" +
+        "  Make sure to keep only a single jar."),
+    "rapids.shuffle.jars" ->
+      ("The RAPIDS Shuffle Manager requires spark.driver.extraClassPath\n" +
+        "  and spark.executor.extraClassPath settings to include the\n" +
+        "  path to the Spark RAPIDS plugin jar.\n" +
+        "  If the Spark RAPIDS jar is being bundled with your Spark\n" +
+        "  distribution, this step is not needed.")
+  )
 
   def shuffleManagerCommentForUnsupportedVersion(sparkVersion: String, platform: Platform): String = {
     val (latestSparkVersion, latestSmVersion) = platform.latestSupportedShuffleManagerInfo
-    // scalastyle:off line.size.limit
     s"""
        |Cannot recommend RAPIDS Shuffle Manager for unsupported ${platform.sparkVersionLabel}: '$sparkVersion'.
        |To enable RAPIDS Shuffle Manager, use a supported ${platform.sparkVersionLabel} (e.g., '$latestSparkVersion')
        |and set: '--conf spark.shuffle.manager=com.nvidia.spark.rapids.spark$latestSmVersion.RapidsShuffleManager'.
        |See supported versions: $shuffleManagerDocUrl.
        |""".stripMargin.trim.replaceAll("\n", "\n  ")
-    // scalastyle:on line.size.limit
   }
+  // scalastyle:on line.size.limit
 
   def shuffleManagerCommentForMissingVersion: String = {
     "Could not recommend RapidsShuffleManager as Spark version cannot be determined."
@@ -1765,22 +1771,34 @@ trait AutoTunerHelper extends Logging {
 }
 
 /**
- * Provides configuration settings for the Profiling Tool's AutoTuner. This object is as a concrete
- * implementation of the `AutoTunerHelper` interface.
+ * Trait providing default comments for missing or recommended Spark properties,
+ * using values from the provided tuning configuration.
+ * Class mixing in this trait must provide a `tuningConfigs` instance.
  */
-object ProfilingAutoTunerHelper extends AutoTunerHelper {
-  def createAutoTunerInstance(
-      clusterProps: ClusterProperties,
-      appInfoProvider: AppSummaryInfoBaseProvider,
-      platform: Platform,
-      driverInfoProvider: DriverLogInfoProvider): AutoTuner = {
-    appInfoProvider match {
-      case profilingAppProvider: BaseProfilingAppSummaryInfoProvider =>
-        new ProfilingAutoTuner(clusterProps, profilingAppProvider, platform,
-          driverInfoProvider)
-      case _ =>
-        throw new IllegalArgumentException("'appInfoProvider' must be an instance of " +
-          s"${classOf[BaseProfilingAppSummaryInfoProvider]}")
-    }
-  }
+trait AutoTunerCommentsWithTuningConfigs {
+  val tuningConfigs: TuningConfigsProvider
+
+  // scalastyle:off line.size.limit
+  protected val commentsForMissingMemoryProps: Map[String, String] = Map(
+    "spark.executor.memory" ->
+      s"'spark.executor.memory' should be set to at least ${tuningConfigs.getEntry("HEAP_PER_CORE").getDefault}/core.",
+    "spark.rapids.memory.pinnedPool.size" ->
+      s"'spark.rapids.memory.pinnedPool.size' should be set to ${tuningConfigs.getEntry("PINNED_MEMORY").getDefault}.")
+
+  protected val commentsForMissingProps: Map[String, String] = Map(
+    "spark.executor.cores" ->
+      // TODO: This could be extended later to be platform specific.
+      s"'spark.executor.cores' should be set to ${tuningConfigs.getEntry("CORES_PER_EXECUTOR").getDefault}.",
+    "spark.executor.instances" ->
+      "'spark.executor.instances' should be set to (cpuCoresPerNode * numWorkers) / 'spark.executor.cores'.",
+    "spark.task.resource.gpu.amount" ->
+      s"'spark.task.resource.gpu.amount' should be set to ${tuningConfigs.getEntry("TASK_GPU_RESOURCE_AMT").getDefault}.",
+    "spark.rapids.sql.concurrentGpuTasks" ->
+      s"'spark.rapids.sql.concurrentGpuTasks' should be set to Min(${tuningConfigs.getEntry("CONC_GPU_TASKS").getMax.toLong}, (gpuMemory / ${tuningConfigs.getEntry("GPU_MEM_PER_TASK").getDefault})).",
+    "spark.rapids.sql.enabled" ->
+      "'spark.rapids.sql.enabled' should be true to enable SQL operations on the GPU.",
+    "spark.sql.adaptive.enabled" ->
+      "'spark.sql.adaptive.enabled' should be enabled for better performance."
+  ) ++ commentsForMissingMemoryProps
+  // scalastyle:off line.size.limit
 }

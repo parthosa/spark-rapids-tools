@@ -16,6 +16,8 @@
 
 package com.nvidia.spark.rapids.tool.tuning
 
+import java.util
+
 import scala.beans.BeanProperty
 import scala.collection.JavaConverters._
 
@@ -110,116 +112,97 @@ class TuningConfigEntry(
  *
  * Example usage:
  * {{{
- *   val provider = new TuningConfigsProvider()
- *   provider.setToolName("profiling")
+ *   val provider = TuningConfigsProvider(defaultConfigs)
+ *   provider.withTool(QualificationAutoTuner)
  *
  *   // Get configuration values
  *   val heapPerCore = provider.get("HEAP_PER_CORE_MB").getDefault[Long]()
  *   val maxPinned = provider.get("PINNED_MEMORY_MB").getMax[Long]()
- *
- *   // Get configuration description
- *   val description = provider.getDescription("HEAP_PER_CORE_MB")
- *
- *   // Get all config descriptions
- *   val allDescriptions = provider.getAllConfigDescriptions
  * }}}
  */
-class TuningConfigsProvider(
-  @BeanProperty var default: java.util.List[TuningConfigEntry],
-  @BeanProperty var qualification: java.util.List[TuningConfigEntry],
-  @BeanProperty var profiling: java.util.List[TuningConfigEntry]
-) extends ValidatableProperties {
+class TuningConfigsProvider (
+    @BeanProperty var default: util.List[TuningConfigEntry],
+    @BeanProperty var qualification: util.List[TuningConfigEntry],
+    @BeanProperty var profiling: util.List[TuningConfigEntry]) extends ValidatableProperties {
 
-  // Used to determine which tool's configs to use
-  var autoTunerHelper: Option[AutoTunerHelper] = None
+  def this() = this(
+    new util.ArrayList[TuningConfigEntry](),
+    new util.ArrayList[TuningConfigEntry](),
+    new util.ArrayList[TuningConfigEntry]())
 
-  def this() = this(new java.util.ArrayList[TuningConfigEntry](),
-    new java.util.ArrayList[TuningConfigEntry](),
-    new java.util.ArrayList[TuningConfigEntry]())
+  private var selectedTool: Option[AutoTuner] = None
 
-  def setAutoTunerHelper(autoTunerHelper: AutoTunerHelper): Unit = {
-    this.autoTunerHelper = Some(autoTunerHelper)
+  /** Tool-specific overrides for qualification/profiling */
+  private lazy val toolOverrides: util.List[TuningConfigEntry] = selectedTool match {
+    case Some(_: QualificationAutoTuner) => qualification
+    case Some(_: ProfilingAutoTuner) => profiling
+    case _ => throw new IllegalArgumentException(
+      "Tool must be specified as either QualificationAutoTuner or ProfilingAutoTuner")
   }
+
+  /** Cached lookup map, rebuilt from default and toolOverrides */
+  @transient
+  private lazy val tuningConfigsMap: Map[String, TuningConfigEntry] = buildConfigMap()
 
   /**
    * Merges entries from the override list into the base list.
-   * Entries are matched by name. If an entry exists in both lists, they are merged.
-   * Entries only in the override list are added.
-   * NOTE: The base list is modified in place.
-   * @param baseList The base list of TuningConfigEntry (modified in place)
-   * @param overrideList The overriding list of TuningConfigEntry to merge into baseList
+   * Returns a new list containing the merged entries.
    */
-  private def mergeInto(
-      baseList: java.util.List[TuningConfigEntry],
-      overrideList: java.util.List[TuningConfigEntry]): Unit = {
+  private def mergeConfigs(
+      baseList: util.List[TuningConfigEntry],
+      overrideList: util.List[TuningConfigEntry])
+  : util.List[TuningConfigEntry] = {
     if (overrideList == null || overrideList.isEmpty) {
-      return
+      return baseList
     }
-    val baseMap = baseList.asScala.zipWithIndex.map { case (e, i) => e.name -> i }.toMap
-    // Loop through override entries and either merge or add them
+
+    val result = new util.ArrayList[TuningConfigEntry](baseList)
+    val baseMap = baseList.asScala.map(e => e.name -> e).toMap
+
     overrideList.asScala.foreach { overrideEntry =>
       baseMap.get(overrideEntry.name) match {
-        case Some(index) =>
+        case Some(baseEntry) =>
           // Entry exists in base list, merge and update
-          val mergedEntry = baseList.get(index).merge(overrideEntry)
-          baseList.set(index, mergedEntry)
+          val index = result.indexOf(baseEntry)
+          result.set(index, baseEntry.merge(overrideEntry))
         case None =>
           // Entry does not exist in base list, add it
-          baseList.add(overrideEntry)
+          result.add(overrideEntry)
       }
     }
+    result
   }
 
-  /**
-   * Merge another TuningConfigsProvider instance into this one.
-   * The other instance's configs will override this instance's configs for matching keys.
-   * @param other The other TuningConfigsProvider instance to merge
-   */
-  def merge(other: TuningConfigsProvider): Unit = {
-    mergeInto(this.default, other.default)
-    mergeInto(this.qualification, other.qualification)
-    mergeInto(this.profiling, other.profiling)
+  def withTool(maybeTuner: Option[AutoTuner]): TuningConfigsProvider = {
+    this.selectedTool = maybeTuner
+    this
   }
 
-  private lazy val tuningConfigsMap: Map[String, TuningConfigEntry] = {
-    // Select the appropriate tool list based on the autoTunerHelper
-    val toolList = autoTunerHelper match {
-      case Some(QualificationAutoTunerHelper) => qualification
-      case Some(ProfilingAutoTunerHelper) => profiling
-      case _ => throw new IllegalArgumentException(s"Invalid Tool Helper type: $autoTunerHelper")
-    }
-    // Merge the default list with the selected tool list and convert to a map
-    mergeInto(default, toolList)
-    default.asScala.map(e => e.name -> e).toMap
+  private def buildConfigMap(): Map[String, TuningConfigEntry] = {
+    val mergedConfigs = mergeConfigs(default, toolOverrides)
+    mergedConfigs.asScala.map(e => e.name -> e).toMap
   }
 
   /**
    * Get a config entry by name.
    * @param key The config name (e.g., "HEAP_PER_CORE_MB")
    * @return The config entry
+   * @throws IllegalArgumentException if config not found
    */
   def getEntry(key: String): TuningConfigEntry = {
-    tuningConfigsMap.get(key) match {
-      case Some(entry) => entry
-      case None => throw new IllegalArgumentException(s"Config '$key' not found")
-    }
+    tuningConfigsMap(key)
   }
 
   /**
-   * Check if a config exists.
-   * @param key The config name
-   * @return True if the config exists, false otherwise
+   * Merge another TuningConfigsProvider instance into this one.
+   * Returns a new instance with merged configurations.
    */
-  def hasConfig(key: String): Boolean = {
-    tuningConfigsMap.contains(key)
-  }
-
-  /**
-   * Get all available config names.
-   * @return Set of all config names
-   */
-  def getConfigNames: Set[String] = {
-    tuningConfigsMap.keySet
+  def merge(other: TuningConfigsProvider): TuningConfigsProvider = {
+    new TuningConfigsProvider(
+      mergeConfigs(this.default, other.default),
+      mergeConfigs(this.qualification, other.qualification),
+      mergeConfigs(this.profiling, other.profiling)
+    ).withTool(this.selectedTool)
   }
 
   override def validate(): Unit = {
@@ -231,4 +214,12 @@ class TuningConfigsProvider(
 
 object TuningConfigsProvider {
   val DEFAULT_CONFIGS_FILE = "bootstrap/tuningConfigs.yaml"
+
+  def apply(
+      default: util.List[TuningConfigEntry] = new util.ArrayList[TuningConfigEntry](),
+      qualification: util.List[TuningConfigEntry] = new util.ArrayList[TuningConfigEntry](),
+      profiling: util.List[TuningConfigEntry] = new util.ArrayList[TuningConfigEntry]()
+  ): TuningConfigsProvider = {
+    new TuningConfigsProvider(default, qualification, profiling)
+  }
 }

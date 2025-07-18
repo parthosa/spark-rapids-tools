@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 import scala.collection.JavaConverters._
 
 import com.nvidia.spark.rapids.tool.{EventLogInfo, FailedEventLog, PlatformFactory, ToolBase}
-import com.nvidia.spark.rapids.tool.tuning.{ClusterProperties, TargetClusterProps, TunerContext}
+import com.nvidia.spark.rapids.tool.tuning.{ClusterProperties, TargetClusterProps, TunerContext, TuningConfigsProvider}
 import com.nvidia.spark.rapids.tool.views.QualRawReportGenerator
 import com.nvidia.spark.rapids.tool.views.qualification.{QualPerAppReportGenerator, QualReportGenConfProvider, QualToolReportGenerator}
 import org.apache.hadoop.conf.Configuration
@@ -37,7 +37,7 @@ class Qualification(outputPath: String, hadoopConf: Configuration,
     reportSqlLevel: Boolean, maxSQLDescLength: Int, mlOpsEnabled: Boolean,
     penalizeTransitions: Boolean, tunerContext: Option[TunerContext],
     clusterReport: Boolean, platformArg: String, workerInfoPath: Option[String],
-    targetClusterInfoPath: Option[String])
+    targetClusterInfoPath: Option[String], tuningConfigsPath: Option[String])
   extends ToolBase(timeout) {
 
   override val simpleName: String = "qualTool"
@@ -159,7 +159,10 @@ class Qualification(outputPath: String, hadoopConf: Configuration,
               // Note that we call the autotuner anyway without checking the aggregate results
               // because the Autotuner can still make some recommendations based on the information
               // enclosed by the QualificationInfo object
-              tuner.tuneApplication(app, qualSumInfo, appIndex, dsInfo, platform)
+              val userProvidedTuningConfigs = tuningConfigsPath.flatMap(
+                PropertiesLoader[TuningConfigsProvider].loadFromFile)
+              tuner.tuneApplication(app, qualSumInfo, appIndex, dsInfo, platform,
+                userProvidedTuningConfigs)
             }
           }
           if (qualSumInfo.isDefined) {
