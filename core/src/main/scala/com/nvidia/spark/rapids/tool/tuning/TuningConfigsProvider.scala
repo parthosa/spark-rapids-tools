@@ -142,7 +142,10 @@ class TuningConfigsProvider (
 
   /** Cached lookup map, rebuilt from default and toolOverrides */
   @transient
-  private lazy val tuningConfigsMap: Map[String, TuningConfigEntry] = buildConfigMap()
+  private lazy val tuningConfigsMap: Map[String, TuningConfigEntry] = {
+    val mergedConfigs = mergeConfigs(default, toolOverrides)
+    mergedConfigs.asScala.map(e => e.name -> e).toMap
+  }
 
   /**
    * Merges entries from the override list into the base list.
@@ -178,16 +181,10 @@ class TuningConfigsProvider (
     this
   }
 
-  private def buildConfigMap(): Map[String, TuningConfigEntry] = {
-    val mergedConfigs = mergeConfigs(default, toolOverrides)
-    mergedConfigs.asScala.map(e => e.name -> e).toMap
-  }
-
   /**
    * Get a config entry by name.
    * @param key The config name (e.g., "HEAP_PER_CORE_MB")
    * @return The config entry
-   * @throws IllegalArgumentException if config not found
    */
   def getEntry(key: String): TuningConfigEntry = {
     tuningConfigsMap(key)
