@@ -25,23 +25,30 @@ import org.apache.spark.network.util.ByteUnit
 import org.apache.spark.sql.rapids.tool.util.{StringUtils, ValidatableProperties}
 
 /**
- * Represents a tuning configuration entry with name, description, default, min, and max values.
+ * Represents a tuning configuration entry with the following properties:
+ *   - name:        The configuration parameter name/key.
+ *   - description: Human-readable description of the configuration parameter.
+ *   - usedBy:      Comma-separated list of Spark configurations this constant affects.
+ *   - default:     The default value to use (optional).
+ *   - min:         The minimum allowed value (optional).
+ *   - max:         The maximum allowed value (optional).
  */
 class TuningConfigEntry(
-  @BeanProperty var name: String,
-  @BeanProperty var description: String,
-  @BeanProperty var default: String,
-  @BeanProperty var min: String,
-  @BeanProperty var max: String) extends ValidatableProperties {
+  @BeanProperty var name: String = "",
+  @BeanProperty var description: String = "",
+  @BeanProperty var usedBy: String = "",
+  @BeanProperty var default: String = "",
+  @BeanProperty var min: String = "",
+  @BeanProperty var max: String = "") extends ValidatableProperties {
 
-  def this() = this("", "", "", "", "")
+  def this() = this("", "", "", "", "", "")
 
   private def isEmptyValue(value: String): Boolean = {
     value == null || value.isEmpty
   }
 
   private def isEmpty: Boolean = {
-    isEmptyValue(name) && isEmptyValue(description) &&
+    isEmptyValue(name) && isEmptyValue(description) && isEmptyValue(usedBy)
       isEmptyValue(default) && isEmptyValue(min) && isEmptyValue(max)
   }
 
@@ -86,14 +93,14 @@ class TuningConfigEntry(
   }
 
   override def toString: String = {
-    s"TuningConfigEntry(name='$name', description='$description'," +
+    s"TuningConfigEntry(name='$name', description='$description', usedBy='$usedBy'" +
       s" default='$default', min='$min', max='$max')"
   }
 
   override def validate(): Unit = {
     // Skip validation if the entry is completely empty (i.e. when loaded from YAML with no values)
     if (!isEmpty) {
-      // Validate the name and description are not empty
+      // Validate the name is defined
       if (isEmptyValue(name)) {
         throw new IllegalArgumentException(s"Name must be defined for config '$name'")
       }
@@ -103,6 +110,18 @@ class TuningConfigEntry(
           s"must be defined for config '$name'")
       }
     }
+  }
+}
+
+object TuningConfigEntry {
+  def apply(
+      name: String,
+      description: String = "",
+      usedBy: String = "",
+      default: String = "",
+      min: String = "",
+      max: String = ""): TuningConfigEntry = {
+    new TuningConfigEntry(name, description, usedBy, default, min, max)
   }
 }
 
@@ -121,19 +140,22 @@ class TuningConfigEntry(
  * }}}
  */
 class TuningConfigsProvider (
-    @BeanProperty var default: util.List[TuningConfigEntry],
-    @BeanProperty var qualification: util.List[TuningConfigEntry],
-    @BeanProperty var profiling: util.List[TuningConfigEntry]) extends ValidatableProperties {
+    @BeanProperty var default: util.List[TuningConfigEntry] =
+      new util.ArrayList[TuningConfigEntry](),
+    @BeanProperty var qualification: util.List[TuningConfigEntry] =
+      new util.ArrayList[TuningConfigEntry](),
+    @BeanProperty var profiling: util.List[TuningConfigEntry] =
+      new util.ArrayList[TuningConfigEntry](),
+    val selectedAutoTuner: Option[AutoTuner] = None) extends ValidatableProperties {
 
   def this() = this(
     new util.ArrayList[TuningConfigEntry](),
     new util.ArrayList[TuningConfigEntry](),
-    new util.ArrayList[TuningConfigEntry]())
-
-  private var selectedTool: Option[AutoTuner] = None
+    new util.ArrayList[TuningConfigEntry](),
+    None)
 
   /** Tool-specific overrides for qualification/profiling */
-  private lazy val toolOverrides: util.List[TuningConfigEntry] = selectedTool match {
+  private lazy val toolOverrides: util.List[TuningConfigEntry] = selectedAutoTuner match {
     case Some(_: QualificationAutoTuner) => qualification
     case Some(_: ProfilingAutoTuner) => profiling
     case _ => throw new IllegalArgumentException(
@@ -176,9 +198,11 @@ class TuningConfigsProvider (
     result
   }
 
-  def withTool(maybeTuner: Option[AutoTuner]): TuningConfigsProvider = {
-    this.selectedTool = maybeTuner
-    this
+  /**
+   * Returns a new TuningConfigsProvider instance with the specified tool's overrides applied.
+   */
+  def withAutoTuner(maybeTuner: Option[AutoTuner]): TuningConfigsProvider = {
+    new TuningConfigsProvider(default, qualification, profiling, maybeTuner)
   }
 
   /**
@@ -198,8 +222,9 @@ class TuningConfigsProvider (
     new TuningConfigsProvider(
       mergeConfigs(this.default, other.default),
       mergeConfigs(this.qualification, other.qualification),
-      mergeConfigs(this.profiling, other.profiling)
-    ).withTool(this.selectedTool)
+      mergeConfigs(this.profiling, other.profiling),
+      this.selectedAutoTuner
+    )
   }
 
   override def validate(): Unit = {
@@ -211,12 +236,4 @@ class TuningConfigsProvider (
 
 object TuningConfigsProvider {
   val DEFAULT_CONFIGS_FILE = "bootstrap/tuningConfigs.yaml"
-
-  def apply(
-      default: util.List[TuningConfigEntry] = new util.ArrayList[TuningConfigEntry](),
-      qualification: util.List[TuningConfigEntry] = new util.ArrayList[TuningConfigEntry](),
-      profiling: util.List[TuningConfigEntry] = new util.ArrayList[TuningConfigEntry]()
-  ): TuningConfigsProvider = {
-    new TuningConfigsProvider(default, qualification, profiling)
-  }
 }

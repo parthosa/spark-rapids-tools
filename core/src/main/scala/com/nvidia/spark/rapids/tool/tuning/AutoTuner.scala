@@ -341,7 +341,7 @@ abstract class AutoTuner(
         throw new RuntimeException(
           "Failed to load default value for tuning config: " +
             "The file is missing or has invalid format.")
-      }.withTool(Some(this))
+      }.withAutoTuner(Some(this))
     // Merge with user provided configs if any.
     userProvidedTuningConfigs.map(baseConfigs.merge).getOrElse(baseConfigs)
   }
