@@ -64,7 +64,7 @@ class QualAppSummaryInfoProvider(
     Option(appInfo.sparkVersion)
   }
 
-  def getAppID: String = appInfo.appId
+  override def getAppID: String = appInfo.appId
 
   override def getJvmGCFractions: Seq[Double] = {
     rawAggMetrics.sqlAggs.map {

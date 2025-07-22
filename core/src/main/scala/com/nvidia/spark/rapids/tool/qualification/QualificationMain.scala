@@ -20,6 +20,7 @@ import scala.util.control.NonFatal
 
 import com.nvidia.spark.rapids.tool.{EventLogPathProcessor, PlatformFactory}
 import com.nvidia.spark.rapids.tool.tuning.{ClusterProperties, TunerContext}
+import com.nvidia.spark.rapids.tool.views.qualification.QualReportGenConfProvider
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.rapids.tool.AppFilterImpl
@@ -110,7 +111,8 @@ object QualificationMain extends Logging {
     }
     // create the AutoTuner context object
     val tunerContext = if (appArgs.autoTuner()) {
-      TunerContext(outputDirectory, Option(hadoopConf))
+      val tuningOutputDir = QualReportGenConfProvider.getTuningReportPath(outputDirectory)
+      TunerContext(tuningOutputDir, Option(hadoopConf))
     } else {
       None
     }

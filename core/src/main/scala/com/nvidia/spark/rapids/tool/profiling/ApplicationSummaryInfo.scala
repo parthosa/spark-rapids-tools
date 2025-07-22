@@ -147,6 +147,10 @@ class SingleAppSummaryInfoProvider(
     Option(app.appInfo.head.sparkVersion)
   }
 
+  override def getAppID: String = {
+    appInfo.appId
+  }
+
   override def getJvmGCFractions: Seq[Double] = {
     app.sqlTaskAggMetrics.map {
       taskMetrics => taskMetrics.jvmGCTimeSum * 1.0 / taskMetrics.executorCPUTimeSum

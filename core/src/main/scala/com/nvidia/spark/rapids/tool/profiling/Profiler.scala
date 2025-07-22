@@ -21,8 +21,8 @@ import java.util.concurrent.TimeUnit
 import scala.collection.JavaConverters._
 import scala.util.control.NonFatal
 
-import com.nvidia.spark.rapids.tool.{AppSummaryInfoBaseProvider, EventLogInfo, EventLogPathProcessor, FailedEventLog, PlatformFactory, ToolBase}
-import com.nvidia.spark.rapids.tool.tuning.{AutoTuner, ClusterProperties, ProfilingAutoTunerHelper, TargetClusterProps, TuningConfigsProvider, TuningEntryTrait}
+import com.nvidia.spark.rapids.tool.{EventLogInfo, EventLogPathProcessor, FailedEventLog, PlatformFactory, ToolBase}
+import com.nvidia.spark.rapids.tool.tuning.{ClusterProperties, ProfilingAutoTunerRunner, TargetClusterProps, TunerContext, TuningConfigsProvider, TuningEntryTrait}
 import com.nvidia.spark.rapids.tool.views._
 import org.apache.hadoop.conf.Configuration
 
@@ -314,7 +314,7 @@ class Profiler(hadoopConf: Configuration, appArgs: ProfileArgs, enablePB: Boolea
   }
 
   /**
-   * A wrapper method to run the AutoTuner.
+   * A wrapper method to run the AutoTuner using TunerContext.
    * @param profilerResult     ProfilerResult object storing the app info, summary and diagnostics
    * @param driverInfoProvider Entity that implements APIs needed to extract information from the
    *                           driver log if any
@@ -328,18 +328,22 @@ class Profiler(hadoopConf: Configuration, appArgs: ProfileArgs, enablePB: Boolea
     // assumptions made in the code
     val appInfoFromSummary = profilerResult.flatMap(_.summary.appInfo.headOption)
     if (appInfoFromSummary.isDefined && appInfoFromSummary.get.pluginEnabled) {
-      val appInfoProvider = AppSummaryInfoBaseProvider.fromAppInfo(profilerResult)
       val platform = profilerResult.get.app.platform.getOrElse {
         throw new IllegalStateException("Profiling AutoTuner requires a platform. " +
           "Please provide a valid platform using --platform option.")
       }
-      val autoTuner: AutoTuner = ProfilingAutoTunerHelper.buildAutoTuner(appInfoProvider,
-        platform, driverInfoProvider, userProvidedTuningConfigs)
 
-      // The autotuner allows skipping some properties,
-      // e.g., getRecommendedProperties(Some(Seq("spark.executor.instances"))) skips the
-      // recommendation related to executor instances.
-      autoTuner.getRecommendedProperties()
+      // Create TunerContext for consistent handling with Qualification AutoTuner
+      val tunerContext = TunerContext(outputDir, Some(hadoopConf))
+        .getOrElse(throw new IllegalStateException("Failed to create TunerContext"))
+
+      // Use ProfilingAutoTunerRunner similar to QualificationAutoTunerRunner
+      ProfilingAutoTunerRunner(profilerResult, tunerContext, driverInfoProvider) match {
+        case Some(runner) => runner.runAutoTuner(platform, userProvidedTuningConfigs)
+        case None =>
+          logWarning("Failed to create ProfilingAutoTunerRunner")
+          (Seq.empty, Seq.empty)
+      }
     } else {
       logWarning("The Profiling tool AutoTuner is only available for GPU event logs, " +
         "skipping recommendations!")
