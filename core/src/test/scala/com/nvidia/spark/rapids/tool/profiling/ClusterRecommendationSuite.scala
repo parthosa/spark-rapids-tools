@@ -496,13 +496,14 @@ class ClusterRecommendationSuite extends ProfilingAutoTunerSuiteBase
   test("test CSP platform with OnPrem-style target cluster specs") {
     // Verify that CSP platforms can accept OnPrem-style target cluster specifications
     // (cpuCores/memoryGB/GPU) as a fallback when instanceType is not provided.
+    // OnPrem-style uses generic GPU names (e.g., "l4" instead of "nvidia-l4")
     val expectedClusterInfo = RecommendedClusterInfo(
       vendor = PlatformNames.DATAPROC,
       coresPerExecutor = 16,
       numWorkerNodes = 8,
       numGpusPerNode = 1,
       numExecutors = 8,
-      gpuDevice = "nvidia-l4",
+      gpuDevice = GpuTypes.L4, // Generic GPU name for OnPrem-style
       dynamicAllocationEnabled = false,
       dynamicAllocationMaxExecutors = "N/A",
       dynamicAllocationMinExecutors = "N/A",
@@ -537,6 +538,70 @@ class ClusterRecommendationSuite extends ProfilingAutoTunerSuiteBase
         s"${tempSubDir.getAbsolutePath}", s"$fileName.json"
       ).toFile
       assertRecommendedClusterInfo(actualClusterInfoFile, expectedClusterInfo)
+    }
+  }
+
+  test("test unsupported GPU device on Dataproc platform") {
+    // Verify that specifying GPU device with instance type results in an error
+    TrampolineUtil.withTempDir { tempDir =>
+      val targetClusterInfoFile = ToolTestUtils.createTargetClusterInfoFile(
+        tempDir.getAbsolutePath,
+        workerNodeInstanceType = Some("n1-standard-16"),
+        gpuCount = Some(1),
+        gpuDevice = Some(GpuTypes.K80)) // Trying to specify GPU with instance type
+
+      val appArgs = new ProfileArgs(Array(
+        "--platform",
+        PlatformNames.DATAPROC,
+        "--target-cluster-info",
+        targetClusterInfoFile.toString,
+        "--output-directory",
+        tempDir.getAbsolutePath,
+        "--csv",
+        "--auto-tuner",
+        s"$profilingLogDir/nds_q66_gpu.zstd"))
+
+      val exception = intercept[IllegalArgumentException] {
+        ProfileMain.mainInternal(appArgs)
+      }
+
+      // Verify the error message
+      assert(exception.getMessage.contains("GPU device cannot be specified when using instance type"))
+    }
+  }
+
+  test("test OnPrem-style config supports any GPU on CSP platform") {
+    // Verify that CSP platforms accept OnPrem-style specifications with any GPU device,
+    // including those not natively supported by that platform (like K80 on Dataproc)
+    // However, during recommendation generation, it will still fail when trying to
+    // get platform-specific GPU names for unsupported GPUs
+    TrampolineUtil.withTempDir { tempDir =>
+      val targetClusterInfoFile = ToolTestUtils.createTargetClusterInfoFile(
+        tempDir.getAbsolutePath,
+        cpuCores = Some(16),
+        memoryGB = Some(64L),
+        gpuCount = Some(1),
+        gpuDevice = Some(GpuTypes.K80)) // OnPrem-style allows K80 in config
+
+      val appArgs = new ProfileArgs(Array(
+        "--platform",
+        PlatformNames.DATAPROC,
+        "--target-cluster-info",
+        targetClusterInfoFile.toString,
+        "--output-directory",
+        tempDir.getAbsolutePath,
+        "--csv",
+        "--auto-tuner",
+        s"$profilingLogDir/nds_q66_gpu.zstd"))
+
+      val (exit, _) = ProfileMain.mainInternal(appArgs)
+      assert(exit == 0)
+
+      // Even though K80 is allowed in OnPrem-style config, the recommendation
+      // generation will fail because K80 is not supported on Dataproc
+      val expectedStatusCount = StatusReportCounts(0, 0, 0, 1) // 1 UNKNOWN
+      ToolTestUtils.compareStatusReport(sparkSession, expectedStatusCount,
+        s"${tempDir.getAbsolutePath}/${Profiler.SUBDIR}/profiling_status.csv")
     }
   }
 }

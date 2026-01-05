@@ -64,6 +64,11 @@ class WorkerInfo (
       throw new IllegalArgumentException(
         "Both instance type and OnPrem resource values are provided. Please specify either one")
     }
+    if (isCspInfo && !gpu.isEmpty && gpu.device.isDefined) {
+      throw new IllegalArgumentException(
+        "GPU device cannot be specified when using instance type. " +
+          "The GPU type is determined by the instance type.")
+    }
     if (isOnpremInfo && gpu.isEmpty) {
       throw new IllegalArgumentException("GPU information is required for OnPrem " +
         "target cluster configuration.")

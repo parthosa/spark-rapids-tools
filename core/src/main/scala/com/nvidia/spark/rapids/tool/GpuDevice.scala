@@ -43,6 +43,36 @@ abstract class GpuDevice {
   final def getGpuConcTasks(gpuMemPerTaskMB: Long): Long = {
     StringUtils.convertToMB(getMemory, Some(ByteUnit.BYTE)) / gpuMemPerTaskMB
   }
+
+  /**
+   * Get platform-specific GPU device name.
+   *
+   * @param platformName Platform identifier (use PlatformNames constants)
+   * @return Platform-specific name
+   * @throws IllegalArgumentException if no mapping found for this GPU on the platform
+   *                                  (indicates a bug)
+   */
+  def getPlatformName(platformName: String): String = {
+    platformName match {
+      case pn if Set(PlatformNames.DATAPROC, PlatformNames.DATAPROC_GKE,
+        PlatformNames.DATAPROC_SL).contains(pn) =>
+        getDataprocName().getOrElse {
+          throw new IllegalArgumentException(
+            s"GPU '$this' is not supported on Dataproc. " +
+            "See: https://docs.cloud.google.com/dataproc/docs/concepts/compute/gpus#types_of_gpus"
+          )
+        }
+      case _ => this.toString
+    }
+  }
+
+  /**
+   * Get Dataproc-specific GPU accelerator name.
+   * Must be implemented by all GPU device classes.
+   * Return None if this GPU is not supported/available on Dataproc.
+   * Reference: https://docs.cloud.google.com/dataproc/docs/concepts/compute/gpus#types_of_gpus
+   */
+  protected def getDataprocName(): Option[String]
 }
 
 case object A100Gpu extends GpuDevice {
@@ -50,6 +80,7 @@ case object A100Gpu extends GpuDevice {
   override def getAdvisoryPartitionSizeInBytes: Option[String] = Some("64m")
   override def getInitialPartitionNum: Option[Int] = Some(400)
   override def toString: String = GpuTypes.A100
+  override protected def getDataprocName(): Option[String] = Some("nvidia-a100-80gb")
 }
 
 case object T4Gpu extends GpuDevice {
@@ -60,47 +91,56 @@ case object T4Gpu extends GpuDevice {
   // TODO - what is this based off of?
   override def getInitialPartitionNum: Option[Int] = Some(800)
   override def toString: String = GpuTypes.T4
+  override protected def getDataprocName(): Option[String] = Some("nvidia-tesla-t4")
 }
 
 case object L4Gpu extends GpuDevice {
   override def getMemory: String = "24576m"
   override def toString: String = GpuTypes.L4
+  override protected def getDataprocName(): Option[String] = Some("nvidia-l4")
 }
 
 case object L20Gpu extends GpuDevice {
   // TODO: Add recommended values for advisory partition size
   override def getMemory: String = "49152m"
   override def toString: String = GpuTypes.L20
+  override protected def getDataprocName(): Option[String] = None
 }
 
 case object V100Gpu extends GpuDevice {
   override def getMemory: String = "16384m"
   override def toString: String = GpuTypes.V100
+  override protected def getDataprocName(): Option[String] = Some("nvidia-tesla-v100")
 }
 
 case object K80Gpu extends GpuDevice {
   override def getMemory: String = "12288m"
   override def toString: String = GpuTypes.K80
+  override protected def getDataprocName(): Option[String] = None
 }
 
 case object P100Gpu extends GpuDevice {
   override def getMemory: String = "16384m"
   override def toString: String = GpuTypes.P100
+  override protected def getDataprocName(): Option[String] = Some("nvidia-tesla-p100")
 }
 
 case object P4Gpu extends GpuDevice {
   override def getMemory: String = "8192m"
   override def toString: String = GpuTypes.P4
+  override protected def getDataprocName(): Option[String] = Some("nvidia-tesla-p4")
 }
 
 case object A10Gpu extends GpuDevice {
   override def getMemory: String = "24576m"
   override def toString: String = GpuTypes.A10
+  override protected def getDataprocName(): Option[String] = None
 }
 
 case object A10GGpu extends GpuDevice {
   override def getMemory: String = "24576m"
   override def toString: String = GpuTypes.A10G
+  override protected def getDataprocName(): Option[String] = None
 }
 
 object GpuDevice extends Logging {

@@ -70,6 +70,43 @@ class GpuDevice(EnumeratedType):
         }
         return memory_hash.get(self)
 
+    def get_platform_name(self, platform: 'CspEnv') -> str:
+        """
+        Get platform-specific GPU device name.
+
+        :param platform: Platform type (CspEnv enum)
+        :return: Platform-specific name
+        :raises ValueError: If GPU is not supported on the platform
+        """
+        from spark_rapids_tools import CspEnv
+        match platform:
+            case CspEnv.DATAPROC | CspEnv.DATAPROC_GKE:
+                dataproc_name = self._get_dataproc_name()
+                if dataproc_name is None:
+                    raise ValueError(
+                        f"GPU '{self.tostring(self)}' is not supported on Dataproc. "
+                        "See: https://docs.cloud.google.com/dataproc/docs/concepts/compute/gpus#types_of_gpus"
+                    )
+                return dataproc_name
+            case _:
+                return self.tostring(self)
+
+    def _get_dataproc_name(self) -> Optional[str]:
+        """
+        Get Dataproc-specific GPU accelerator name.
+        Return None if this GPU is not supported/available on Dataproc.
+        Reference: https://docs.cloud.google.com/dataproc/docs/concepts/compute/gpus#types_of_gpus
+        """
+        dataproc_names = {
+            self.L4: 'nvidia-l4',
+            self.A100: 'nvidia-a100-80gb',
+            self.P100: 'nvidia-tesla-p100',
+            self.V100: 'nvidia-tesla-v100',
+            self.P4: 'nvidia-tesla-p4',
+            self.T4: 'nvidia-tesla-t4'
+        }
+        return dataproc_names.get(self)
+
 
 class ClusterState(EnumeratedType):
     """
@@ -937,19 +974,6 @@ class PlatformBase:
         template_path = Utils.resource_path(f'templates/cluster_template/{CspEnv.pretty_print(self.type_id)}.ms')
         return TemplateGenerator.render_template_file(template_path, render_args)
 
-    def get_platform_gpu_device_name(self, gpu_device_str: str) -> str:
-        """
-        Convert generic GPU device name to platform-specific GPU device name.
-        By default, returns the GPU device string as-is.
-        Override this method in platform-specific classes to provide
-        platform-specific GPU device naming (e.g., "nvidia-l4" for Dataproc).
-
-        :param gpu_device_str: Generic GPU device name (e.g., "T4", "L4")
-        :return: Platform-specific GPU device name
-        """
-        return gpu_device_str
-
-
 @dataclass
 class ClusterBase(ClusterGetAccessor):
     """
@@ -1231,8 +1255,10 @@ class ClusterBase(ClusterGetAccessor):
         Returns a dictionary containing the GPU configuration of the cluster
         """
         gpu_per_machine, gpu_device_str = self.get_gpu_per_worker()
-        # Convert generic GPU device name to platform-specific name
-        platform_gpu_name = self.platform.get_platform_gpu_device_name(gpu_device_str)
+        # Convert string to GpuDevice enum and get platform-specific name
+        gpu_device_enum: GpuDevice = GpuDevice.fromstring(gpu_device_str)
+        platform_gpu_name = gpu_device_enum.get_platform_name(self.platform.type_id)
+
         # Need to handle case this was CPU event log and just make a recommendation
         if platform_gpu_name and gpu_per_machine > 0:
             return {
