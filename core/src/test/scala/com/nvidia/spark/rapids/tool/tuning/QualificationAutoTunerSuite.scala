@@ -1661,6 +1661,54 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
     compareOutput(expectedResults, autoTunerOutput)
   }
 
+  // Test AutoTuner caps executor.instances to maxExecutors when initialExecutors is not set
+  // for CPU-to-GPU conversion. This ensures executor.instances doesn't exceed maxExecutors.
+  test("test AutoTuner caps executor.instances to maxExecutors when initialExecutors not set") {
+    // Simulating CPU app scenario: dynamicAllocation.enabled=true, maxExecutors=148,
+    // but initialExecutors is NOT set. Source is CPU (no spark.plugins with SQLPlugin).
+    val logEventsProps: mutable.Map[String, String] = mutable.LinkedHashMap[String, String](
+      "spark.executor.cores" -> "11",  // CPU cores
+      "spark.executor.memory" -> "21g",
+      "spark.dynamicAllocation.enabled" -> "true",
+      "spark.dynamicAllocation.minExecutors" -> "1",
+      "spark.dynamicAllocation.maxExecutors" -> "148"
+      // Note: spark.dynamicAllocation.initialExecutors is intentionally NOT set
+      // Note: spark.executor.instances is intentionally NOT set
+      // Note: spark.plugins is NOT set - this is a CPU app
+    )
+
+    val infoProvider = getMockInfoProvider(0, Seq(0), Seq(0.0),
+      logEventsProps, Some(testSparkVersion))
+    val platform = PlatformFactory.createInstance(PlatformNames.EMR)
+    platform.configureClusterInfoFromEventLog(
+      coresPerExecutor = 11,
+      execsPerNode = 1,
+      numExecs = 148,  // This would set executor.instances to 148 in cluster recommendation
+      numExecutorNodes = 148,
+      sparkProperties = logEventsProps.toMap,
+      systemProperties = Map.empty
+    )
+
+    val autoTuner = buildAutoTunerForTests(infoProvider, platform)
+    val (properties, comments) = autoTuner.getRecommendedProperties()
+    val autoTunerOutput = Profiler.getAutoTunerResultsAsString(properties, comments)
+
+    // GPU cores = 16 (default from EMR platform), CPU cores = 11
+    // adjustRatio = 11/16 = 0.6875
+    // maxExecutors adjusted = floor(148 × 0.6875) = 101
+    // executor.instances should be capped to 101 (not 148)
+    // Key assertion: executor.instances should not exceed maxExecutors (both should be 101)
+    val expectedResults = Seq(
+      "--conf spark.dynamicAllocation.maxExecutors=101",
+      "--conf spark.executor.instances=101"
+    )
+    assertExpectedLinesExist(expectedResults, autoTunerOutput)
+
+    // Also verify that executor.instances is NOT 148
+    assert(!autoTunerOutput.contains("spark.executor.instances=148"),
+      "executor.instances should be capped to 101, not 148")
+  }
+
   test("test AutoTuner does not recommend dynamic allocation properties when disabled") {
     val logEventsProps = mutable.LinkedHashMap[String, String](
       "spark.executor.cores" -> "8",

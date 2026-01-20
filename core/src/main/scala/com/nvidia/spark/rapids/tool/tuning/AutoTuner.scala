@@ -969,6 +969,26 @@ abstract class AutoTuner(
   }
 
   /**
+   * Ensures executor.instances does not exceed maxExecutors when dynamic allocation is enabled.
+   * This maintains consistency between executor instances and dynamic allocation limits,
+   * regardless of whether core ratio adjustments are applied.
+   */
+  private def ensureExecutorInstancesConsistency(): Unit = {
+    val maxExecutorsOpt = getPropertyValue("spark.dynamicAllocation.maxExecutors")
+      .map(_.toInt)
+      .filter(_ > 0)
+    maxExecutorsOpt.foreach { maxExec =>
+      recommendations.get("spark.executor.instances")
+        .flatMap(_.tunedValue)
+        .map(_.toInt)
+        .filter(_ > maxExec)
+        .foreach { _ =>
+          appendRecommendation("spark.executor.instances", maxExec.toLong)
+        }
+    }
+  }
+
+  /**
    * Recommend dynamic allocation configurations for GPU runs.
    * Adjusts initialExecutors, minExecutors, and maxExecutors based on the ratio
    * of CPU cores to GPU cores.
@@ -990,6 +1010,16 @@ abstract class AutoTuner(
       removeRecommendation("spark.dynamicAllocation.initialExecutors")
       removeRecommendation("spark.dynamicAllocation.minExecutors")
       removeRecommendation("spark.dynamicAllocation.maxExecutors")
+      return
+    }
+
+    // Check if the source application was already GPU-enabled.
+    // If so, skip the core ratio adjustment as we're not converting from CPU to GPU.
+    if (ToolUtils.isPluginEnabled(getAllSourceProperties)) {
+      // Source was already a GPU app, don't adjust dynamic allocation properties
+      // based on core ratio as the user's settings are already GPU-optimized.
+      // However, still ensure executor.instances doesn't exceed maxExecutors for consistency.
+      ensureExecutorInstancesConsistency()
       return
     }
 
@@ -1068,6 +1098,11 @@ abstract class AutoTuner(
     adjustedValue("spark.dynamicAllocation.maxExecutors").foreach { v =>
       markAsAdjustedProperty("spark.dynamicAllocation.maxExecutors", v)
       appendRecommendation("spark.dynamicAllocation.maxExecutors", v)
+
+      // Ensure executor.instances does not exceed maxExecutors when dynamic allocation is enabled.
+      // This handles the case where initialExecutors is not set in the source, so the block above
+      // that adjusts executor.instances doesn't run, but maxExecutors was adjusted down.
+      ensureExecutorInstancesConsistency()
     }
 
     if (adjustedProperties.nonEmpty) {

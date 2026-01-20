@@ -1911,6 +1911,50 @@ class ProfilingAutoTunerSuiteV2 extends ProfilingAutoTunerSuiteBase {
     val (_, _) = autoTuner.getRecommendedProperties()
   }
 
+  // Test AutoTuner does NOT adjust dynamic allocation properties when source was
+  // already GPU-enabled. When the source app was already running with RAPIDS plugin,
+  // we shouldn't apply the CPU-to-GPU core ratio adjustment as the user's settings
+  // are already GPU-optimized.
+  test("AutoTuner preserves maxExecutors when source was already GPU-enabled") {
+    // Simulating GPU app scenario: dynamicAllocation.enabled=true, maxExecutors=148,
+    // and source has spark.plugins with SQLPlugin (already GPU-enabled).
+    val logEventsProps: mutable.Map[String, String] = mutable.LinkedHashMap[String, String](
+      "spark.executor.cores" -> "11",
+      "spark.executor.memory" -> "21g",
+      "spark.executor.resource.gpu.amount" -> "1",
+      "spark.dynamicAllocation.enabled" -> "true",
+      "spark.dynamicAllocation.minExecutors" -> "1",
+      "spark.dynamicAllocation.maxExecutors" -> "148",
+      "spark.plugins" -> "com.nvidia.spark.SQLPlugin",
+      "spark.rapids.sql.enabled" -> "true"
+    )
+
+    val infoProvider = getMockInfoProvider(0, Seq(0), Seq(0.0),
+      logEventsProps, Some(testSparkVersion))
+    val platform = PlatformFactory.createInstance(PlatformNames.ONPREM)
+
+    configureEventLogClusterInfoForTest(
+      platform,
+      numCores = 11,
+      numWorkers = 148,
+      gpuCount = 1,
+      sparkProperties = logEventsProps.toMap
+    )
+
+    val autoTuner = buildAutoTunerForTests(infoProvider, platform, Some(Yarn))
+    val (properties, comments) = autoTuner.getRecommendedProperties()
+    val autoTunerOutput = Profiler.getAutoTunerResultsAsString(properties, comments)
+
+    // Since source was already GPU-enabled, maxExecutors should NOT be adjusted.
+    // Verify that the adjusted value (101) is NOT in the output
+    assert(!autoTunerOutput.contains("spark.dynamicAllocation.maxExecutors=101"),
+      "maxExecutors should NOT be adjusted to 101 for GPU-enabled source")
+
+    // The comment about dynamic allocation adjustment should also not appear
+    assert(!autoTunerOutput.contains("Tuned dynamic allocation properties"),
+      "Should not have dynamic allocation adjustment comment for GPU-enabled source")
+  }
+
   // Test that NON_EXECUTOR_MEM takes precedence over NON_EXECUTOR_MEM_FRACTION
   test("NON_EXECUTOR_MEM takes precedence over NON_EXECUTOR_MEM_FRACTION") {
     val logEventsProps: mutable.Map[String, String] =
