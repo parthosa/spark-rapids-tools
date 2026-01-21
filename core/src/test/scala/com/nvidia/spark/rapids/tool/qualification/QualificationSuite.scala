@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2025, NVIDIA CORPORATION.
+ * Copyright (c) 2021-2026, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1481,6 +1481,243 @@ class QualificationSuite extends BaseWithSparkSuite {
                   expectedWriteExec.equals(r("Unsupported Operator")) &&
                     r("Details").equals("Unsupported IO format")
                 } shouldBe 1
+              }))
+        .build()
+    }
+  }
+
+  runConditionalTest("Iceberg metadata table scans are unsupported",
+   checkIcebergSupportForSpark) {
+    // This test verifies that Iceberg metadata table scans are detected and marked as unsupported.
+    // All execs in a SQL containing metadata scans should be marked unsupported with IgnorePerf.
+    //
+    // Tests all Iceberg metadata tables:
+    // - snapshots: Lists all snapshots in the table
+    // - manifests: Lists manifest files for current snapshot
+    // - files: Lists current data files
+    // - history: Shows table history
+    // - partitions: Shows partition information
+    // - all_manifests: Lists all manifest files
+    // - all_data_files: Lists all data files
+    TrampolineUtil.withTempDir { warehouseDir =>
+      QToolTestCtxtBuilder()
+        .withEvLogProvider(
+          EventlogProviderImpl(s"create an app with Iceberg metadata table scans")
+            .withAppName(s"TestAppIcebergMetadataScans")
+            .withSparkConfigs(
+              Map(
+                "spark.sql.extensions" ->
+                  "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+                "spark.sql.catalog.local" -> "org.apache.iceberg.spark.SparkCatalog",
+                "spark.sql.catalog.local.type" -> "hadoop",
+                "spark.sql.catalog.local.warehouse" -> warehouseDir.getAbsolutePath))
+            .withFunc { (_, spark) =>
+              import spark.implicits._
+              // 1. Create an Iceberg table with some data
+              spark.sql(
+                "CREATE TABLE local.db.iceberg_test (id BIGINT, value STRING) USING iceberg")
+              val df1 = Seq((1L, "first"), (2L, "second")).toDF("id", "value")
+              df1.writeTo("local.db.iceberg_test").append()
+
+              // Add another batch to create multiple snapshots/manifests
+              val df2 = Seq((3L, "third"), (4L, "fourth")).toDF("id", "value")
+              df2.writeTo("local.db.iceberg_test").append()
+
+              // 2. Query ALL metadata tables - these should ALL be marked as unsupported
+              // Test each metadata table type to ensure comprehensive coverage
+              spark.read.format("iceberg").load("local.db.iceberg_test.snapshots").collect()
+              spark.read.format("iceberg").load("local.db.iceberg_test.manifests").collect()
+              spark.read.format("iceberg").load("local.db.iceberg_test.files").collect()
+              spark.read.format("iceberg").load("local.db.iceberg_test.history").collect()
+              spark.read.format("iceberg").load("local.db.iceberg_test.partitions").collect()
+              spark.read.format("iceberg").load("local.db.iceberg_test.all_manifests").collect()
+              spark.read.format("iceberg").load("local.db.iceberg_test.all_data_files").collect()
+
+              // 3. Query normal data table - this should be supported
+              spark.sql("SELECT * FROM local.db.iceberg_test WHERE id > 1")
+            })
+        .withPerSQL()
+        .withChecker(
+          QToolResultCoreChecker("check app count")
+            .withExpectedSize(1)
+            .withSuccessCode())
+        .withChecker(
+          QToolOutFileCheckerImpl("All metadata table scans should be marked unsupported")
+            .withTableLabel("execCSVReport")
+            .withContentVisitor(
+              "All Iceberg metadata table scans should be unsupported with IgnorePerf",
+              csvF => {
+                // Find all BatchScan operations marked as unsupported with IgnorePerf
+                // These should be the metadata table scans
+                val metadataScanRows = csvF.csvRows.filter { r =>
+                  r("Exec Name").contains("BatchScan") &&
+                    r("Exec Is Supported").equals("false") &&
+                    r("Action").equals("IgnorePerf")
+                }
+
+                // We queried 7 metadata tables, so we should have at least 7 unsupported scans
+                // (snapshots, manifests, files, history, partitions, all_manifests, all_data_files)
+                metadataScanRows.size should be >= 7
+
+                // For each metadata scan SQL, verify ALL execs in that SQL are unsupported
+                metadataScanRows.foreach { metaScanRow =>
+                  val metaSqlID = metaScanRow("SQL ID")
+                  val allExecsInSQL = csvF.csvRows.filter(r => r("SQL ID").equals(metaSqlID))
+
+                  // All execs (except AdaptiveSparkPlan) should be unsupported with IgnorePerf
+                  allExecsInSQL.foreach { execRow =>
+                    if (!execRow("Exec Name").equals("AdaptiveSparkPlan")) {
+                      execRow("Exec Is Supported") shouldBe "false"
+                      execRow("Action") shouldBe "IgnorePerf"
+                    }
+                  }
+                }
+              }
+            ))
+        .withChecker(
+          QToolOutFileCheckerImpl("Unsupported ops should contain all metadata table scans")
+            .withTableLabel("unsupportedOpsCSVReport")
+            .withContentVisitor(
+              "All metadata table BatchScans should be listed with ReadIcebergMetadata type",
+              csvF => {
+                // Verify that Iceberg metadata scans appear in unsupported ops report
+                val icebergMetaScans = csvF.csvRows.filter { r =>
+                  r("Unsupported Type").equals("ReadIcebergMetadata") &&
+                    r("Unsupported Operator").contains("BatchScan") &&
+                    r("Details").equals("Iceberg metadata scans are not supported") &&
+                    r("Action").equals("IgnorePerf")
+                }
+
+                // Should have at least 7 metadata scan entries
+                // (one for each metadata table type tested)
+                icebergMetaScans.size should be >= 7
+              }))
+        .withChecker(
+          QToolOutFileCheckerImpl("Normal Iceberg data scans should remain supported")
+            .withTableLabel("execCSVReport")
+            .withContentVisitor(
+              "Normal data table scans should not be marked as metadata scans",
+              csvF => {
+                // Find the normal data query (id > 1)
+                // This should be a regular BatchScan that is supported
+                val normalDataScans = csvF.csvRows.filter { r =>
+                  r("Exec Name").contains("BatchScan") &&
+                    r("Exec Is Supported").equals("true")
+                }
+
+                // Should have at least one normal supported scan
+                normalDataScans.size should be >= 1
+              }))
+        .build()
+    }
+  }
+
+runConditionalTest("Iceberg MERGE INTO operators (MergeRows, ReplaceData) are marked unsupported",
+    checkIcebergSupportForSpark) {
+    // This test verifies that BOTH MergeRows AND ReplaceData from Iceberg MERGE INTO operations
+    // are correctly parsed and marked as unsupported.
+    //
+    // DAG structure (copy-on-write mode):
+    //   ReplaceData (12)       <- Write operator (OpType: WriteExec)
+    //   +- Project (11)
+    //      +- MergeRows (10)   <- Merge logic operator (OpType: Exec)
+    //         +- SortMergeJoin FullOuter (9)
+    //
+    // Note: Spark plan shows "MergeRows" and "ReplaceData" (without Exec suffix).
+    val expectedMergeExec = "MergeRows"
+    val expectedWriteExec = "ReplaceData"
+    TrampolineUtil.withTempDir { warehouseDir =>
+      QToolTestCtxtBuilder()
+        .withEvLogProvider(
+          EventlogProviderImpl(s"create an app with Iceberg MERGE INTO operation")
+            .withAppName(s"TestAppIcebergMergeInto")
+            .withSparkConfigs(
+              Map(
+                "spark.sql.extensions" ->
+                  "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+                "spark.sql.catalog.local" -> "org.apache.iceberg.spark.SparkCatalog",
+                "spark.sql.catalog.local.type" -> "hadoop",
+                "spark.sql.catalog.local.warehouse" -> warehouseDir.getAbsolutePath))
+            .withFunc { (_, spark) =>
+              import spark.implicits._
+              // 1. Create target Iceberg table with initial data
+              spark.sql(
+                "CREATE TABLE local.db.target_table (id BIGINT, value STRING) USING iceberg")
+              val targetData = Seq((1L, "old_value1"), (2L, "old_value2")).toDF("id", "value")
+              targetData.writeTo("local.db.target_table").append()
+
+              // 2. Create source data for merge
+              val sourceData = Seq((1L, "new_value1"), (3L, "new_value3")).toDF("id", "value")
+              sourceData.createOrReplaceTempView("source_data")
+
+              // 3. Perform MERGE INTO operation which generates:
+              //    - MergeRows (merge logic)
+              //    - ReplaceData (write operator in copy-on-write mode)
+              spark.sql(
+                """MERGE INTO local.db.target_table t
+                  |USING source_data s
+                  |ON t.id = s.id
+                  |WHEN MATCHED THEN UPDATE SET t.value = s.value
+                  |WHEN NOT MATCHED THEN INSERT (id, value) VALUES (s.id, s.value)
+                  |""".stripMargin)
+
+              // 4. Verify the merge worked
+              spark.sql("SELECT * FROM local.db.target_table ORDER BY id")
+            })
+        .withPerSQL()
+        .withChecker(
+          QToolResultCoreChecker("check app count")
+            .withExpectedSize(1)
+            .withSuccessCode())
+        .withChecker(
+          QToolOutFileCheckerImpl("Execs should contain both MergeRows and ReplaceData")
+            .withTableLabel("execCSVReport")
+            .withContentVisitor(
+              "Both MergeRows and ReplaceData should appear in the exec report",
+              csvF => {
+                // Check MergeRows
+                val mergeRowsExecs = csvF.csvRows.filter { r =>
+                  r("Exec Name").contains(expectedMergeExec)
+                }
+                mergeRowsExecs.size should be >= 1
+                mergeRowsExecs.foreach { row =>
+                  row("Exec Is Supported") shouldBe "false"
+                }
+
+                // Check ReplaceData (the write operator for CoW mode)
+                val replaceDataExecs = csvF.csvRows.filter { r =>
+                  r("Exec Name").contains(expectedWriteExec)
+                }
+                replaceDataExecs.size should be >= 1
+                replaceDataExecs.foreach { row =>
+                  row("Exec Is Supported") shouldBe "false"
+                }
+              }))
+        .withChecker(
+          QToolOutFileCheckerImpl("Unsupported operators should contain MergeRows and ReplaceData")
+            .withTableLabel("unsupportedOpsCSVReport")
+            .withContentVisitor(
+              "MergeRows (Exec) and ReplaceData (WriteExec) should appear in unsupported operators",
+              csvF => {
+                // Check MergeRows is listed as unsupported with Exec type
+                val mergeRowsUnsupported = csvF.csvRows.filter { r =>
+                  r("Unsupported Operator").contains(expectedMergeExec)
+                }
+                mergeRowsUnsupported.size should be >= 1
+                mergeRowsUnsupported.foreach { row =>
+                  // MergeRows is an intermediate Exec, not WriteExec
+                  row("Unsupported Type") shouldBe "Exec"
+                }
+
+                // Check ReplaceData is listed as unsupported with WriteExec type
+                val replaceDataUnsupported = csvF.csvRows.filter { r =>
+                  r("Unsupported Operator").contains(expectedWriteExec)
+                }
+                replaceDataUnsupported.size should be >= 1
+                replaceDataUnsupported.foreach { row =>
+                  // ReplaceData is a WriteExec
+                  row("Unsupported Type") shouldBe "WriteExec"
+                }
               }))
         .build()
     }
