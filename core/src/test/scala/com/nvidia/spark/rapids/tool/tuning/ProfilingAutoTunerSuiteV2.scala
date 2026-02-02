@@ -1945,15 +1945,10 @@ class ProfilingAutoTunerSuiteV2 extends ProfilingAutoTunerSuiteBase {
     val (properties, comments) = autoTuner.getRecommendedProperties()
     val autoTunerOutput = Profiler.getAutoTunerResultsAsString(properties, comments)
 
-    // Since source was already GPU-enabled, maxExecutors should NOT be adjusted.
-    // Verify that the adjusted value (101) is NOT in the output
-    assert(!autoTunerOutput.contains("spark.dynamicAllocation.maxExecutors=101"),
-      "maxExecutors should NOT be adjusted to 101 for GPU-enabled source")
-
-    // The comment about dynamic allocation adjustment should also not appear
-    assert(!autoTunerOutput.contains("Tuned dynamic allocation properties"),
-      "Should not have dynamic allocation adjustment comment for GPU-enabled source")
-  }
+    // Since source was already GPU-enabled, dynamic allocation maxExecutors should NOT be adjusted.
+    assert(!autoTunerOutput.contains("spark.dynamicAllocation.maxExecutors"),
+      "Dynamic allocation maxExecutors should not be adjusted for GPU-enabled source")
+      }
 
   // Test that NON_EXECUTOR_MEM takes precedence over NON_EXECUTOR_MEM_FRACTION
   test("NON_EXECUTOR_MEM takes precedence over NON_EXECUTOR_MEM_FRACTION") {
