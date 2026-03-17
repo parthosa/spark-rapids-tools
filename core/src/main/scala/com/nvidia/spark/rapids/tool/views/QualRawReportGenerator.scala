@@ -71,9 +71,19 @@ object QualRawReportGenerator extends Logging {
     val pWriter =
       new ProfileOutputWriter(metricsDirectory, "profile", 10000000, outputCSV = true)
     try {
+      // Compute aggregate metrics early so maxTaskInputBytesRead is available for
+      // application_information.csv enrichment
+      val aggRawMetrics = QualSparkMetricsAggregator
+        .getAggRawMetrics(app, sqlAnalyzer = Some(sqlPlanAnalyzer))
+      val maxTaskInput = aggRawMetrics.maxTaskInputSizes.headOption
+        .map(_.maxTaskInputBytesRead).getOrElse(0.0)
+
       pWriter.writeText("### A. Information Collected ###")
-      pWriter.writeTable(
-        QualInformationView.getLabel, QualInformationView.getRawView(Seq(app)))
+      // Enrich application info with maxTaskInputBytesRead from aggregate metrics.
+      // OOM and ColumnarExchange columns are empty for qualification (CPU event logs).
+      val enrichedAppInfo = QualInformationView.getRawView(Seq(app)).map(
+        _.copy(maxTaskInputBytesRead = maxTaskInput))
+      pWriter.writeTable(QualInformationView.getLabel, enrichedAppInfo)
       pWriter.writeTable(QualLogPathView.getLabel, QualLogPathView.getRawView(Seq(app)))
       val sqlPlanMetricsResults = generateSQLProcessingView(pWriter, sqlPlanAnalyzer)
       pWriter.writeJsonL(
@@ -96,9 +106,8 @@ object QualRawReportGenerator extends Logging {
         SystemQualPropertiesView.getRawView(Seq(app)),
         Some(SystemQualPropertiesView.getDescription))
       pWriter.writeText("\n### B. Analysis ###\n")
-      constructLabelsMaps(QualSparkMetricsAggregator
-        .getAggRawMetrics(
-          app, sqlAnalyzer = Some(sqlPlanAnalyzer))).foreach { case (label, metrics) =>
+      // Reuse already-computed aggRawMetrics instead of computing again
+      constructLabelsMaps(aggRawMetrics).foreach { case (label, metrics) =>
           pWriter.writeCSVTable(label, metrics)
       }
       pWriter.writeText("\n### C. Health Check###\n")

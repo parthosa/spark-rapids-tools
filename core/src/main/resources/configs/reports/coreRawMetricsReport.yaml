@@ -106,6 +106,22 @@ reportDefinitions:
             dataType: Long
             description: >-
               TBD
+          - name: maxTaskInputBytesRead
+            dataType: Double
+            description: >-
+              Maximum per-task input bytes read across all SQLs
+          - name: maxColumnarExchangeDataSizeBytes
+            dataType: Long
+            description: >-
+              Maximum data size from ColumnarExchange metrics (profiling only)
+          - name: scanStagesWithGpuOom
+            dataType: String
+            description: >-
+              Comma-separated stage IDs of scan stages with GPU OOM (profiling only)
+          - name: shuffleStagesWithOom
+            dataType: String
+            description: >-
+              Comma-separated stage IDs of shuffle stages with OOM (profiling only)
       # AppLogPathProfileResults
       - label: coreRawApplicationLogPathMappingCSV
         description: >-

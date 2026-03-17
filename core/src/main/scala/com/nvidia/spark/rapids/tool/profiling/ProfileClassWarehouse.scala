@@ -458,7 +458,11 @@ case class AppInfoProfileResults(
     sparkRuntime: SparkRuntime.SparkRuntime,
     sparkVersion: String,
     pluginEnabled: Boolean,
-    totalCoreSeconds: Long)  extends ProfileResult {
+    totalCoreSeconds: Long,
+    maxTaskInputBytesRead: Double = 0.0,
+    maxColumnarExchangeDataSizeBytes: Option[Long] = None,
+    scanStagesWithGpuOom: Set[Long] = Set.empty,
+    shuffleStagesWithOom: Set[Long] = Set.empty)  extends ProfileResult {
   override def outputHeaders: Array[String] = {
     OutHeaderRegistry.outputHeaders("AppInfoProfileResults")
   }
@@ -491,11 +495,23 @@ case class AppInfoProfileResults(
     }
   }
 
+  private def maxColumnarExchangeToStr: String = {
+    maxColumnarExchangeDataSizeBytes.map(_.toString).getOrElse("")
+  }
+
+  private def stageIdsToStr(stageIds: Set[Long]): String = {
+    if (stageIds.isEmpty) "" else stageIds.toSeq.sorted.mkString(",")
+  }
+
   override def convertToSeq(): Array[String] = {
     Array(appName, appIdToStr, attemptIdToStr,
       sparkUser, startTime.toString, endTimeToStr, durToStr,
       durationStr, sparkRuntime.toString, sparkVersion, pluginEnabled.toString,
-      totalCoreSeconds.toString)
+      totalCoreSeconds.toString,
+      f"$maxTaskInputBytesRead%.0f",
+      maxColumnarExchangeToStr,
+      stageIdsToStr(scanStagesWithGpuOom),
+      stageIdsToStr(shuffleStagesWithOom))
   }
 
   override def convertToCSVSeq(): Array[String] = {
@@ -507,7 +523,11 @@ case class AppInfoProfileResults(
       StringUtils.reformatCSVString(sparkRuntime.toString),
       StringUtils.reformatCSVString(sparkVersion),
       pluginEnabled.toString,
-      totalCoreSeconds.toString)
+      totalCoreSeconds.toString,
+      f"$maxTaskInputBytesRead%.0f",
+      maxColumnarExchangeToStr,
+      StringUtils.reformatCSVString(stageIdsToStr(scanStagesWithGpuOom)),
+      StringUtils.reformatCSVString(stageIdsToStr(shuffleStagesWithOom)))
   }
 }
 

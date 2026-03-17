@@ -37,6 +37,18 @@ class CollectInformation(apps: Seq[ApplicationInfo]) extends Logging {
     ProfInformationView.getRawView(apps)
   }
 
+  def getEnrichedAppInfo(
+      maxTaskInputBytesRead: Double,
+      maxColumnarExchangeDataSizeBytes: Option[Long],
+      scanStagesWithGpuOom: Set[Long],
+      shuffleStagesWithOom: Set[Long]): Seq[AppInfoProfileResults] = {
+    getAppInfo.map(_.copy(
+      maxTaskInputBytesRead = maxTaskInputBytesRead,
+      maxColumnarExchangeDataSizeBytes = maxColumnarExchangeDataSizeBytes,
+      scanStagesWithGpuOom = scanStagesWithGpuOom,
+      shuffleStagesWithOom = shuffleStagesWithOom))
+  }
+
   def getAppLogPath: Seq[AppLogPathProfileResults] = {
     ProfLogPathView.getRawView(apps)
   }
