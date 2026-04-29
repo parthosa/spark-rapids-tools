@@ -64,3 +64,5 @@ csp-resources*
 **/new_operators.txt
 
 core/bin/*
+
+.worktrees/
