@@ -17,7 +17,10 @@
 package com.nvidia.spark.rapids.tool.views
 
 import com.nvidia.spark.rapids.tool.analysis.{AggRawMetricsResult, AppSQLPlanAnalyzer, QualSparkMetricsAggregator}
-import com.nvidia.spark.rapids.tool.profiling.{AppLevelRecommendationSignalsProfileResult, DataSourceProfileResult, ProfileOutputWriter, ProfileResult, SQLAccumProfileResults}
+import com.nvidia.spark.rapids.tool.profiling.{
+  AppLevelRecommendationSignalsProfileResult, DataSourceProfileResult, ProfileOutputWriter,
+  Profiler, ProfileResult, SQLAccumProfileResults}
+import org.apache.hadoop.conf.Configuration
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.rapids.tool.qualification.QualificationAppInfo
@@ -37,7 +40,10 @@ object QualRawReportGenerator extends Logging {
       AggMetricsResultSorter.sortSqlAgg(aggRawResult.sqlAggs),
       AggMetricsResultSorter.sortIO(aggRawResult.ioAggs),
       AggMetricsResultSorter.sortSqlDurationAgg(aggRawResult.sqlDurAggs),
-      AggMetricsResultSorter.sortStageDiagnostics(aggRawResult.stageDiagnostics))
+      AggMetricsResultSorter.sortStageDiagnostics(aggRawResult.stageDiagnostics),
+      aggRawResult.gpuStageAggs.sortBy(r => (r.stageId, r.metricName)),
+      aggRawResult.gpuSqlAggs.sortBy(r => (r.sqlId, r.metricName)),
+      aggRawResult.gpuAppAggs.sortBy(_.metricName))
     Map(
       STAGE_AGG_LABEL -> sortedRes.stageAggs,
       JOB_AGG_LABEL -> sortedRes.jobAggs,
@@ -45,7 +51,10 @@ object QualRawReportGenerator extends Logging {
       SQL_AGG_LABEL -> sortedRes.sqlAggs,
       IO_LABEL -> sortedRes.ioAggs,
       SQL_DUR_LABEL -> sortedRes.sqlDurAggs,
-      STAGE_DIAGNOSTICS_LABEL -> sortedRes.stageDiagnostics)
+      STAGE_DIAGNOSTICS_LABEL -> sortedRes.stageDiagnostics,
+      GPU_STAGE_AGG_LABEL -> sortedRes.gpuStageAggs,
+      GPU_SQL_AGG_LABEL -> sortedRes.gpuSqlAggs,
+      GPU_APP_AGG_LABEL -> sortedRes.gpuAppAggs)
   }
 
   private def generateSQLProcessingView(
@@ -63,7 +72,9 @@ object QualRawReportGenerator extends Logging {
 
   def generateRawMetricQualViewAndGetDataSourceInfo(
       rootDir: String,
-      app: QualificationAppInfo): Seq[DataSourceProfileResult] = {
+      app: QualificationAppInfo,
+      writeConnectStatements: Boolean = false,
+      hadoopConf: Option[Configuration] = None): Seq[DataSourceProfileResult] = {
     val metricsDirectory = s"$rootDir/raw_metrics/${app.appId}"
     val sqlPlanAnalyzer = AppSQLPlanAnalyzer(app)
     var dataSourceInfo: Seq[DataSourceProfileResult] = Seq.empty
@@ -117,6 +128,7 @@ object QualRawReportGenerator extends Logging {
         QualRemovedExecutorView.getLabel, QualRemovedExecutorView.getRawView(Seq(app)))
       // we only need to write the CSV report of the WriteOps
       pWriter.writeCSVTable(QualWriteOpsView.getLabel, QualWriteOpsView.getRawView(Seq(app)))
+      Profiler.writeConnectTables(pWriter, app, writeConnectStatements, hadoopConf)
     } catch {
       case e: Exception =>
         logError(s"Error generating raw metrics for ${app.appId}: ${e.getMessage}")
