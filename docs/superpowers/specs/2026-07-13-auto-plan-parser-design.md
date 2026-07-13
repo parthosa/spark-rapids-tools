@@ -16,7 +16,7 @@ limitations under the License.
 
 # auto-plan-parser — Agentic Parser-Maintenance Skill
 
-**Status:** Design / spec (v2 — revised after Codex review)
+**Status:** Design / spec (v2.1 — review incorporated; stage/mode count, log-privacy boundary, and skill layout clarified)
 **Date:** 2026-07-13
 **Author:** Partho Sarthi (psarthi@nvidia.com)
 **Scope:** `spark-rapids-tools` core (Scala plan parser + metrics parser)
@@ -92,7 +92,7 @@ and self-verifies the parser code, gated by humans in proportion to risk.
 | Correctness signals | (1) plugin-source cross-check, (2) synthetic plan fixtures, (3) real GPU event logs |
 | Scope | New execs, new/renamed metrics, new expressions, new read/write formats |
 | Human-in-the-loop | **Gate scales with `riskTier`**, assigned pre-generation and independent of verification results |
-| v1 vehicle | Manual Claude Code skill (`/auto-plan-parser`) with independent `detect`/`research`/`generate`/`verify`/`publish` modes |
+| v1 vehicle | Manual Claude Code skill (`/auto-plan-parser`) with independent `sync`/`detect`/`research`/`generate`/`verify`/`publish` modes |
 
 ### Compound-engineering framing
 
@@ -132,17 +132,20 @@ derived from `gapType` + normalized operator/metric name + affected version set.
 
 ## 5. Architecture — staged, independently-runnable modes
 
-The skill (`SKILL.md` orchestrator) exposes five modes that also run as one
-pipeline. Each emits a schema-validated artifact so stages compose, are
-inspectable, and wrap cleanly into CI.
+The skill (`SKILL.md` orchestrator) exposes **six modes** (`sync`, `detect`,
+`research`, `generate`, `verify`, `publish`) that also run as one pipeline. Each
+emits a schema-validated artifact so stages compose, are inspectable, and wrap
+cleanly into CI.
 
-### Stage 0 — Sync (reuse, don't reinvent)
+### Stage 0 — Sync mode (reuse, don't reinvent)
 
-Run (or call the library functions of) `process_supported_files.py` and
-`sync_operator_scores.py`. Output: vendored CSVs with `TNEW` rows,
-`new_operators.txt`, the sync report, and appended per-platform operator scores.
-Operator-score sync stays **separate** — there are many
-`operatorsScore-<platform>.csv` files, not one canonical file.
+`sync` is a first-class mode, not merely an external prerequisite: it wraps the
+existing `process_supported_files.py` and `sync_operator_scores.py` (calling
+their library functions) so the full pipeline is runnable from the skill alone,
+while still allowing a dev to run the scripts by hand and start from `detect`.
+Output: vendored CSVs with `TNEW` rows, `new_operators.txt`, the sync report, and
+appended per-platform operator scores. Operator-score sync stays **separate** —
+there are many `operatorsScore-<platform>.csv` files, not one canonical file.
 
 ### Stage 1 — Detect  → `gaps.json`
 
@@ -222,7 +225,11 @@ unrelated Tier-1 output.
 3. **Real GPU logs.** Confirm the *actual emitted node name* (not the assumed
    plugin class name), and produce a structured **coverage record** per gap that
    compares stable semantic outputs — not whole generated reports, which carry
-   unrelated ordering/environment noise.
+   unrelated ordering/environment noise. A **deterministic local script** runs the
+   tools over the corpus and extracts only the redacted, structured signals the
+   agent needs (emitted node names, support verdicts, extracted expression sets,
+   duration values, diagnostic classifications). The agent reasons over that
+   script's output; raw log content is never read into the agent context (see §9).
 
 ### 6.2 Per-capability oracles (not "no longer unknown")
 
@@ -281,8 +288,10 @@ require a clean worktree or a recorded baseline diff at start.
 
 Real customer logs may contain paths, SQL text, schemas, identifiers. Logs stay
 **local**, are never copied into prompts or committed, and must come from an
-approved/redacted corpus. The dossier records corpus IDs and hashes, not raw log
-content.
+approved/redacted corpus. A deterministic local script (§6.1 signal 3) is the
+*only* component that touches raw logs; it emits redacted structured results, and
+the agent reasons solely over those. The dossier records corpus IDs and hashes,
+not raw log content.
 
 ## 10. Skill layout & test commands
 
@@ -290,11 +299,24 @@ content.
 skills/auto-plan-parser/
   SKILL.md            # orchestrator: modes, provenance, gate logic, schemas
   schemas/            # JSON Schemas for gaps.json, plan.json, dossier
+  scripts/            # deterministic, testable, non-agent code:
+                      #   extract_plugin_metrics.py  (fail-closed source extraction, §6.1/§7.2)
+                      #   validate_artifact.py        (schema validation at stage boundaries)
+                      #   verify_logs.py              (local log run → redacted structured results, §6.1/§9)
+                      #   sync wrappers               (call process_supported_files / sync_operator_scores)
+  fixtures/           # deterministic test inputs:
+                      #   detector/                   (human-labeled gap fixtures, §12 criterion 1)
+                      #   plugin-source/              (pinned snippets for extraction tests, §7.2)
+                      #   synthetic-plans/            (SparkPlanInfo + AppBase fixtures for oracles, §6.1)
   detector.md         # Stage 1 subagent prompt
   researcher.md       # Stage 2 subagent prompt
   generator.md        # Stage 3 subagent prompt
   verifier.md         # Stage 4 subagent prompt
 ```
+
+The `scripts/` directory holds the deterministic, independently-testable code the
+correctness story depends on (source extraction, schema validation, log
+verification) — kept out of the agent prompts so it can be unit-tested and pinned.
 
 The verifier maps edits to focused suites first, then broadens: the relevant
 parser suite, `PluginTypeCheckerSuite`, diagnostic-metric tests, style checks, and
@@ -317,7 +339,7 @@ codes, and any skipped matrix entries.
 | bound PR size | §5 Stage 5 |
 | explicit test commands | §10 |
 | protect event-log data | §9 |
-| decouple analysis from PR | §5 (five modes), Stage 5 |
+| decouple analysis from PR | §5 (six modes), Stage 5 |
 
 ## 12. v1 success criteria (measurable)
 
