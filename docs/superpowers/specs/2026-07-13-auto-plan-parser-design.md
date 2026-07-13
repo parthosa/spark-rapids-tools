@@ -33,27 +33,52 @@ limitations under the License.
 
 The skill turns a plugin release into reviewed parser code through six modes.
 Each mode reads the prior mode's schema-validated artifact and can also be run in
-isolation. The dashed box is the **only** component that touches raw event logs.
+isolation.
 
+**Where the AI agent sits.** The agent does the *judgment and authoring* —
+**Research** (read plugin source, choose an analog, assign `riskTier`) and
+**Generate** (write the Scala parser and tests) — and it orchestrates the
+pipeline. Everything the correctness story leans on is **deterministic,
+non-agent code**: the sync wrappers, source extraction, schema validation, and
+`verify_logs.py` (the only component that reads raw logs). Detection is
+script-led with light agent assist; the verification oracles are deterministic
+and the agent only *interprets* their pass/fail. Humans own the gate and the
+merge. This keeps the agent where it adds the most value — understanding and code
+— and out of the places that must be reproducible.
+
+```mermaid
+flowchart TD
+    P[plugin release<br/>per-Spark-version CSVs]
+    T[tools repo]
+    L[(GPU log corpus)]
+
+    SYNC["<b>SYNC</b><br/>wrap process_supported_files.py<br/>→ TNEW rows, new_operators.txt"]:::script
+    DETECT["<b>DETECT</b> → gaps.json<br/>capability matrix per op<br/>normalize GpuFoo→Foo"]:::scriptish
+    RESEARCH["<b>RESEARCH</b> → plan.json<br/>read plugin source · pick analog<br/>assign riskTier + citations"]:::agent
+    GATE{"riskTier gate<br/>T1: auto · T2/T3: approve plan"}:::human
+    GEN["<b>GENERATE</b><br/>Scala parser + fixtures + tests"]:::agent
+    VERIFY["<b>VERIFY</b> → dossier<br/>3 signals: source x-check ·<br/>synthetic · real-log<br/>passed / failed / n-a / not-exercised"]:::scriptish
+    VLOG["verify_logs.py (local)<br/>raw logs → redacted<br/>structured results"]:::script
+    PUB["<b>PUBLISH</b><br/>branch/PR · clear passed TNEW"]:::agent
+    MERGE(["human reviews & merges"]):::human
+    COMPOUND["merged parser =<br/>next run's analog"]:::agent
+
+    P --> SYNC --> DETECT --> RESEARCH --> GATE
+    T --> DETECT
+    GATE --> GEN --> VERIFY
+    L --> VLOG --> VERIFY
+    VERIFY -->|failed → back to research| RESEARCH
+    VERIFY -->|passed| PUB --> MERGE --> COMPOUND
+
+    classDef agent fill:#2d6cdf,color:#ffffff,stroke:#1b4aa0,stroke-width:1px;
+    classDef script fill:#e8eaed,color:#202124,stroke:#9aa0a6,stroke-width:1px;
+    classDef scriptish fill:#fef7e0,color:#202124,stroke:#f9ab00,stroke-width:1px;
+    classDef human fill:#e6f4ea,color:#0d652d,stroke:#34a853,stroke-width:1px;
 ```
-        plugin release (per-Spark-version CSVs)  +  tools repo  +  GPU log corpus
-                                    │
-   ┌─────────┐   ┌────────┐   ┌──────────┐   ┌──────────┐   ┌────────┐   ┌─────────┐
-   │  SYNC   │──▶│ DETECT │──▶│ RESEARCH │──▶│ GENERATE │──▶│ VERIFY │──▶│ PUBLISH │
-   └─────────┘   └────────┘   └──────────┘   └──────────┘   └────────┘   └─────────┘
-    wrap existing  gaps.json    plan.json      Scala + tests   dossier      branch/PR
-    sync scripts   capability   analog +       (per gap)       pass/fail/   (optional)
-    → TNEW rows,   matrix per   riskTier +                     n-a/not-
-    new_operators  operator     citations                     exercised
-                        │            │             ▲              │
-                        │            │             │              │  ┌───────────────────────┐
-                        │      riskTier gates ◀─────┘              └─▶│ verify_logs.py (local)│
-                        │      T1→PR only                             │ raw logs → redacted   │
-                        │      T2/T3→plan gate first                  │ structured results    │
-                        └───────────────────────────────────────────▶│ (agent never reads    │
-                                                                      │  raw log content)     │
-                                                                      └───────────────────────┘
-```
+
+**Legend** — 🔵 blue = AI agent (reasoning / authoring) · ⚪ gray = deterministic
+script · 🟡 amber = script-led, agent-assisted · 🟢 green = human. The agent
+never reads raw log content; `verify_logs.py` is the sole raw-log reader.
 
 **End-to-end, for one new operator `GpuFooExec`:**
 
