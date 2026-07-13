@@ -29,6 +29,61 @@ limitations under the License.
 
 ---
 
+## Process at a glance
+
+The skill turns a plugin release into reviewed parser code through six modes.
+Each mode reads the prior mode's schema-validated artifact and can also be run in
+isolation. The dashed box is the **only** component that touches raw event logs.
+
+```
+        plugin release (per-Spark-version CSVs)  +  tools repo  +  GPU log corpus
+                                    │
+   ┌─────────┐   ┌────────┐   ┌──────────┐   ┌──────────┐   ┌────────┐   ┌─────────┐
+   │  SYNC   │──▶│ DETECT │──▶│ RESEARCH │──▶│ GENERATE │──▶│ VERIFY │──▶│ PUBLISH │
+   └─────────┘   └────────┘   └──────────┘   └──────────┘   └────────┘   └─────────┘
+    wrap existing  gaps.json    plan.json      Scala + tests   dossier      branch/PR
+    sync scripts   capability   analog +       (per gap)       pass/fail/   (optional)
+    → TNEW rows,   matrix per   riskTier +                     n-a/not-
+    new_operators  operator     citations                     exercised
+                        │            │             ▲              │
+                        │            │             │              │  ┌───────────────────────┐
+                        │      riskTier gates ◀─────┘              └─▶│ verify_logs.py (local)│
+                        │      T1→PR only                             │ raw logs → redacted   │
+                        │      T2/T3→plan gate first                  │ structured results    │
+                        └───────────────────────────────────────────▶│ (agent never reads    │
+                                                                      │  raw log content)     │
+                                                                      └───────────────────────┘
+```
+
+**End-to-end, for one new operator `GpuFooExec`:**
+
+1. **Sync** (§5 Stage 0) runs the existing `process_supported_files.py`; `FooExec`
+   lands in the vendored CSVs as `Supported = TNEW` and in `new_operators.txt`.
+2. **Detect** (§5 Stage 1) reads those, normalizes `GpuFooExec → FooExec` via the
+   `OssOpMapper` layer, and emits a `gaps.json` entry with a **capability matrix**
+   showing `recognized: false, supportChecked: false` — the required work.
+3. **Research** (§5 Stage 2) reads the plugin's `GpuFooExec` source (its metrics,
+   expressions), picks the closest existing `ExecParser` as an analog, writes a
+   `plan.json` entry with source citations and a **`riskTier`** — assigned *now*,
+   before any code, so the gate is decidable up front.
+4. **Gate** (§6.3) — Tier 1 proceeds automatically; Tier 2/3 pause for human plan
+   approval.
+5. **Generate** (§5 Stage 3) writes the dispatch entry, the `ExecParser`, metric
+   classification edits into the correct consumer, synthetic fixtures, and unit
+   tests, shaped after the analog.
+6. **Verify** (§6) runs three signals cheap→expensive: plugin-source cross-check →
+   synthetic fixtures (with `AppBase` accumulator fixtures if duration is claimed)
+   → real-log assertions via the local redaction script. Results are recorded as
+   `passed / failed / not_applicable / not_exercised` — never silently altering
+   the gate.
+7. **Publish** (§5 Stage 5) opens a PR bundling code, tests, and the verification
+   dossier; a human merges. The PR also clears the `TNEW` entries whose parser
+   work passed.
+8. **Compound** — the merged parser becomes an analog for the next run, and the
+   gap list shrinks.
+
+The rest of this document specifies each of these steps in detail.
+
 ## 1. Problem
 
 The RAPIDS Accelerator plugin (`spark-rapids`) continuously adds GPU operators,
