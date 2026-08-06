@@ -211,6 +211,38 @@ default:
     default: 4g
     usedBy: spark.rapids.shuffle.multiThreaded.maxBytesInFlight
 
+  - name: RESERVE_SPILL_MEMORY
+    description: >-
+      When true (default), AutoTuner divides the residual executor-overhead budget equally
+      between inferred pinned memory and an implicit spill reserve, matching the legacy policy.
+      When false, AutoTuner uses zero implicit spill memory and makes the full residual
+      eligible for pinned memory (subject to the existing PINNED_MEMORY.max cap).
+      Disabling this flag is an operator opt-in that reallocates AutoTuner accounting;
+      it does not guarantee that the RAPIDS plugin or the workload requires no host-memory
+      headroom for unpinned spill or native buffers.
+      An explicitly preserved or enforced spark.rapids.memory.spillPool.size value is always
+      reserved and takes precedence over this automatic policy.
+      This control applies only to the CSP and original-fallback memory formula;
+      the on-prem host-off-heap-limit pinned-memory ratio is unaffected.
+    default: "true"
+    usedBy: spark.rapids.memory.pinnedPool.size, spark.rapids.memory.spillPool.size
+
+  - name: RECOMMEND_MAX_BYTES_IN_FLIGHT
+    description: >-
+      When true (default), AutoTuner charges a synthesized spark.rapids.shuffle.multiThreaded.maxBytesInFlight
+      value (MAX_BYTES_IN_FLIGHT, default 4g) against executor overhead and emits it as a
+      recommendation for eligible CSP executors with 16 or more cores.
+      When false, AutoTuner does not charge the synthesized value or emit a synthesized
+      recommendation or missing-value comment for that property.
+      Disabling this flag is an operator opt-in that reallocates AutoTuner accounting;
+      it does not guarantee that the RAPIDS plugin requires no internal buffer memory
+      for shuffle operations, and workload-dependent host-memory demand remains outside
+      this arithmetic guarantee.
+      An explicitly preserved or enforced spark.rapids.shuffle.multiThreaded.maxBytesInFlight
+      value retains its memory charge and rendered-property output even when this flag is false.
+    default: "true"
+    usedBy: spark.rapids.shuffle.multiThreaded.maxBytesInFlight
+
   - name: BATCH_SIZE_BYTES
     description: >-
       Batch size for GPU operations in bytes

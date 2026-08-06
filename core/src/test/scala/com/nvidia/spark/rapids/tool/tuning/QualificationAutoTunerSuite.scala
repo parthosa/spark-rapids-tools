@@ -2268,4 +2268,62 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
         s"AutoTuner should produce recommendations for GPU device '$gpuName'")
     }
   }
+
+  // AE4: both memory policies disabled with EMR NON_EXECUTOR_MEM_FRACTION=0.1875
+  //   Node memory: 65536 MB (g6.4xlarge 64 GB).
+  //   availableFraction = 0.8125 → totalMemMinusReserved = 65536 * 0.8125 = 53248 MB
+  //   executorHeap = min(53248, 2048 * 16) = 32768 MB
+  //   executorMemOverhead_base = floor(32768 * 0.1) = 3276 MB
+  //   execMemLeft = 53248 - 32768 = 20480 MB
+  //   Both policies false:
+  //     no maxBytesInFlight charge → overhead stays at 3276 MB
+  //     no spill reservation → pinnedMem = min(8192, 20480 - 3276) = 8192 MB = 8g (cap)
+  //     finalOverhead = max(3276 + 8192, 20480) = 20480 MB = 20g
+  test("Memory policy: both false with EMR NON_EXECUTOR_MEM_FRACTION=0.1875 → " +
+    "pinnedPool=8g, no maxBytesInFlight, overhead unchanged (AE4)") {
+    val logEventsProps: mutable.LinkedHashMap[String, String] =
+      mutable.LinkedHashMap[String, String](
+        "spark.executor.cores" -> "8",
+        "spark.executor.instances" -> "20",
+        "spark.executor.memory" -> "16g",
+        "spark.dynamicAllocation.enabled" -> "true",
+        "spark.dynamicAllocation.initialExecutors" -> "12",
+        "spark.dynamicAllocation.minExecutors" -> "12",
+        "spark.dynamicAllocation.maxExecutors" -> "30"
+      )
+    val infoProvider = getMockInfoProvider(0, Seq(0), Seq(0.0),
+      logEventsProps, Some(testSparkVersion))
+    val platform = PlatformFactory.createInstance(PlatformNames.EMR)
+    platform.configureClusterInfoFromEventLog(
+      coresPerExecutor = 8,
+      execsPerNode = 4,
+      numExecs = 20,
+      numExecutorNodes = 5,
+      sparkProperties = logEventsProps.toMap,
+      systemProperties = Map.empty
+    )
+    val tuningConfigs = ToolTestUtils.buildTuningConfigs(
+      default = List(
+        TuningConfigEntry(name = "NON_EXECUTOR_MEM_FRACTION", default = "0.1875"),
+        TuningConfigEntry(name = "RESERVE_SPILL_MEMORY", default = "false"),
+        TuningConfigEntry(name = "RECOMMEND_MAX_BYTES_IN_FLIGHT", default = "false")
+      )
+    )
+    val autoTuner = buildAutoTunerForTests(infoProvider, platform,
+      userProvidedTuningConfigs = Some(tuningConfigs))
+    val (props, comments) = autoTuner.getRecommendedProperties()
+    val pinnedVal = props.find(_.name == "spark.rapids.memory.pinnedPool.size")
+      .map(_.getTuneValue())
+    val overheadVal = props.find(_.name == "spark.executor.memoryOverhead")
+      .map(_.getTuneValue())
+    assert(pinnedVal.contains("8g"),
+      s"Expected pinnedPool.size=8g (cap) but got $pinnedVal")
+    assert(overheadVal.contains("20g"),
+      s"Expected memoryOverhead=20g (20480m) but got $overheadVal")
+    assert(props.forall(_.name != "spark.rapids.shuffle.multiThreaded.maxBytesInFlight"),
+      "No synthesized maxBytesInFlight should be recommended")
+    assert(!comments.exists(_.comment.contains(
+      "'spark.rapids.shuffle.multiThreaded.maxBytesInFlight' was not set.")),
+      "No missing comment for maxBytesInFlight when synthesis is disabled")
+  }
 }

@@ -668,16 +668,40 @@ abstract class AutoTuner(
   }
 
   /**
-   * Recommendation for maxBytesInFlight.
-   *
-   * TODO: To be removed in the future https://github.com/NVIDIA/spark-rapids-tools/issues/1710
+   * Explicit maxBytesInFlight value from the target cluster (enforced or preserved source).
+   * Present only when the operator has supplied a value; absent otherwise.
    */
-  private lazy val recommendedMaxBytesInFlightMB: Long = {
-    val valueStr =
-      platform.getUserEnforcedSparkProperty("spark.rapids.shuffle.multiThreaded.maxBytesInFlight")
-      .getOrElse(configProvider.getEntry("MAX_BYTES_IN_FLIGHT").getDefault)
-    StringUtils.convertToMB(valueStr, Some(ByteUnit.BYTE))
+  private lazy val explicitMaxBytesInFlightMB: Option[Long] =
+    getBaselineSparkProperty("spark.rapids.shuffle.multiThreaded.maxBytesInFlight")
+      .map(StringUtils.convertToMB(_, Some(ByteUnit.BYTE)))
+
+  /**
+   * Synthesized (AutoTuner-generated) maxBytesInFlight value from the tuning configuration.
+   * Used only when RECOMMEND_MAX_BYTES_IN_FLIGHT is enabled and no explicit value is present.
+   *
+   * TODO: Synthesis may be removed in the future https://github.com/NVIDIA/spark-rapids-tools/issues/1710
+   */
+  private lazy val synthesizedMaxBytesInFlightMB: Long =
+    StringUtils.convertToMB(configProvider.getEntry("MAX_BYTES_IN_FLIGHT").getDefault,
+      Some(ByteUnit.BYTE))
+
+  /**
+   * Reads a boolean policy flag from the tuning configuration.
+   * Accepts trimmed, case-insensitive "true" or "false"; warns and returns true for any other text.
+   */
+  private def readBooleanPolicy(name: String): Boolean = {
+    val strVal = configProvider.getEntry(name).getDefault.trim.toLowerCase
+    strVal match {
+      case "true" => true
+      case "false" => false
+      case _ =>
+        logWarning(s"Invalid value '$strVal' for tuning policy '$name'; using default 'true'")
+        true
+    }
   }
+
+  private lazy val reserveSpillMemory: Boolean = readBooleanPolicy("RESERVE_SPILL_MEMORY")
+  private lazy val recommendMaxBytesInFlight: Boolean = readBooleanPolicy("RECOMMEND_MAX_BYTES_IN_FLIGHT")
 
   /**
    * Spark property value to use as an input baseline for recommendation calculations.
@@ -746,13 +770,14 @@ abstract class AutoTuner(
    *
    * Note: In the below examples, `0.8` is the fraction of the physical system memory
    * that is available to Spark executors (0.2 is reserved by Dataproc YARN).
+   * The examples assume RESERVE_SPILL_MEMORY=true (the default enabled policy).
    *
    * Example 1: g2-standard-8 machine (32 GB total memory) — Just enough memory
    *   - actualMemForExec =  32 GB * 0.8 = 25.6 GB
    *   - executorHeap = 16 GB
    *   - sparkOffHeapMemMB = 4 GB
    *   - execMemLeft = 25.6 GB - 16 GB - 4 GB = 5.6 GB
-   *   - minOverhead = 1.6 GB (10% of executor heap) + 2 GB (min pinned) + 2 GB (min spill) = 5.6 GB
+   *   - minOverhead = 1.6 GB (10% of executor heap) + 2 GB (min pinned) + 2 GB (min spill, RESERVE_SPILL_MEMORY=true) = 5.6 GB
    *   - Since execMemLeft (5.6 GB) == minOverhead (5.6 GB), proceed with minimum memory recommendations:
    *   - Recommendation:
    *       - executorHeap = 16 GB, executorMemOverhead = 5.6 GB (with pinnedMem = 2 GB and spillMem = 2 GB)
@@ -762,7 +787,7 @@ abstract class AutoTuner(
    *   - executorHeap = 32 GB
    *   - sparkOffHeapMemMB = 20 GB
    *   - execMemLeft = 51.2 GB - 32 GB - 20 GB = -0.8 GB
-   *   - minOverhead = 2 GB (min pinned) + 2 GB (min spill) + 3.2 GB (10% of executor heap) = 7.2 GB
+   *   - minOverhead = 2 GB (min pinned) + 2 GB (min spill, RESERVE_SPILL_MEMORY=true) + 3.2 GB (10% of executor heap) = 7.2 GB
    *   - Since execMemLeft (-0.8 GB) < minOverhead (7.2 GB), do not proceed with recommendations
    *       - Add a warning comment indicating that the current setup is not optimal
    *           - minTotalExecMemRequired = (32 GB + 20 GB + 7.2 GB) / 0.8 = (59.2 GB / 0.8) = 74 GB (as we are using 80% of system memory)
@@ -773,9 +798,9 @@ abstract class AutoTuner(
    *   - executorHeap = 32 GB
    *   - sparkOffHeapMemMB = 10 GB
    *   - execMemLeft = 51.2 GB - 32 GB - 10 GB = 9.2 GB
-   *   - minOverhead = 2 GB (min pinned) + 2 GB (min spill) + 3.2 GB (10% of executor heap) = 7.2 GB
+   *   - minOverhead = 2 GB (min pinned) + 2 GB (min spill, RESERVE_SPILL_MEMORY=true) + 3.2 GB (10% of executor heap) = 7.2 GB
    *   - Since execMemLeft (9.2 GB) > minOverhead (7.2 GB), proceed with recommendations.
-   *       - Increase pinned and spill memory based on remaining memory (up to 4 GB max)
+   *       - Increase pinned and spill memory based on remaining memory (up to 4 GB max, equal split under RESERVE_SPILL_MEMORY=true)
    *       - executorMemOverhead = 3 GB (pinned) + 3 GB (spill) + 3.2 GB = 9.2 GB
    *   - Recommendation:
    *       - executorHeap = 32 GB, executorMemOverhead = 9.2 GB (with pinnedMem = 3 GB and spillMem = 3 GB)
@@ -789,7 +814,7 @@ abstract class AutoTuner(
    *           - pinned memory size (MB)
    *           - executor memory overhead size (MB)
    *           - executor heap size (MB)
-   *           - boolean indicating if "maxBytesInFlight" should be set
+   *           - boolean indicating if a synthesized "maxBytesInFlight" recommendation should be emitted
    */
    // scalastyle:on line.size.limit
   private def calcOverallMemory(
@@ -835,11 +860,18 @@ abstract class AutoTuner(
     var setMaxBytesInFlight = false
     val defaultPinnedMem = configProvider.getEntry("PINNED_MEMORY").getDefaultAsMemory(ByteUnit.MiB)
     val defaultSpillMem = configProvider.getEntry("SPILL_MEMORY").getDefaultAsMemory(ByteUnit.MiB)
+    // When spill reservation is disabled, the minimum spill floor is the explicit spill baseline
+    // (if present) or zero. On-prem offHeapLimit path is unaffected by the spill policy.
+    val spillFloor: Long = if (reserveSpillMemory) {
+      defaultSpillMem
+    } else {
+      baselineMemorySettings.spillMem.getOrElse(0L)
+    }
     val minOverhead: Long = baselineMemorySettings.executorMemOverhead.getOrElse {
       if (isOffHeapLimitUserEnabled) {
         executorMemOverhead
       } else {
-        executorMemOverhead + defaultPinnedMem + defaultSpillMem
+        executorMemOverhead + defaultPinnedMem + spillFloor
       }
     }
     logDebug(s"Memory calculations:  totalMemMinusReserved=$totalMemMinusReserved MB, " +
@@ -848,14 +880,27 @@ abstract class AutoTuner(
     if (execMemLeft >= minOverhead) {
       // this is hopefully path in the majority of cases because CSPs generally have a good
       // memory to core ratio
-      // Account for the setting of `maxBytesInFlight`
-      if (numExecutorCores >= 16 && platform.isPlatformCSP &&
-        execMemLeft >
-          executorMemOverhead + recommendedMaxBytesInFlightMB +
-            defaultPinnedMem + defaultSpillMem) {
-        executorMemOverhead += recommendedMaxBytesInFlightMB
-        setMaxBytesInFlight = true
+
+      // Determine maxBytesInFlight charge for overhead.
+      // Explicit (enforced or preserved) values are always charged.
+      // Synthesized values are charged only when recommendMaxBytesInFlight is enabled and
+      // the executor meets the core/platform eligibility criteria.
+      val maxBytesChargeMB: Long = explicitMaxBytesInFlightMB.getOrElse {
+        if (recommendMaxBytesInFlight && numExecutorCores >= 16 && platform.isPlatformCSP)
+          synthesizedMaxBytesInFlightMB
+        else 0L
       }
+      if (maxBytesChargeMB > 0L) {
+        val hasHeadroom = execMemLeft >
+          executorMemOverhead + maxBytesChargeMB + defaultPinnedMem + spillFloor
+        if (explicitMaxBytesInFlightMB.isDefined || hasHeadroom) {
+          executorMemOverhead += maxBytesChargeMB
+          // setMaxBytesInFlight signals synthesized output only; explicit values are
+          // already in recommendations from initRecommendations.
+          setMaxBytesInFlight = explicitMaxBytesInFlightMB.isEmpty
+        }
+      }
+
       // Calculate host off-heap limit size for pinned memory calculation
       // (only for onPrem when offHeapLimit is enabled)
       val hostOffHeapLimitSizeMB = if (!platform.isPlatformCSP &&
@@ -873,21 +918,30 @@ abstract class AutoTuner(
         0L // Not used for CSP platforms or when offHeapLimit is disabled
       }
 
-      // Pinned memory calculation - use new formula for onPrem, original logic for CSP
+      // Pinned memory calculation - use new formula for onPrem, original logic for CSP.
+      // Under RESERVE_SPILL_MEMORY=true the residual is split equally between pinned and spill.
+      // Under RESERVE_SPILL_MEMORY=false the full residual (minus any explicit spill) is eligible
+      // for pinned memory, subject to the PINNED_MEMORY.max cap.
+      // The on-prem offHeapLimit path is unaffected by the spill policy.
+      val pinnedMemCap = configProvider.getEntry("PINNED_MEMORY").getMaxAsMemory(ByteUnit.MiB)
       var pinnedMem = baselineMemorySettings.pinnedMem.getOrElse {
         if (!platform.isPlatformCSP && hostOffHeapLimitSizeMB > 0) {
-          // Use new formula for onPrem platform
+          // Use new formula for onPrem platform (spill policy does not apply here)
           calculatePinnedMemorySize(numExecutorCores, hostOffHeapLimitSizeMB)
+        } else if (reserveSpillMemory) {
+          // Legacy policy: equal pinned/spill split from the residual
+          Math.min(pinnedMemCap, (execMemLeft - executorMemOverhead) / 2)
         } else {
-          // Use original logic for CSP platforms or when host off-heap limit calculation fails
-          Math.min(configProvider.getEntry("PINNED_MEMORY").getMaxAsMemory(ByteUnit.MiB),
-            (execMemLeft - executorMemOverhead) / 2)
+          // Disabled spill reservation: full residual minus explicit spill baseline eligible
+          val explicitSpill = baselineMemorySettings.spillMem.getOrElse(0L)
+          Math.min(pinnedMemCap,
+            Math.max(0L, execMemLeft - executorMemOverhead - explicitSpill))
         }
       }
-      // Spill storage is set to the pinned size by default. Its not guaranteed to use just pinned
-      // memory though so the size worst case would be doesn't use any pinned memory and uses
-      // all off heap memory.
-      var spillMem = baselineMemorySettings.spillMem.getOrElse(pinnedMem)
+      // Spill memory: equal to pinned under the enabled policy; explicit baseline or zero otherwise.
+      var spillMem = baselineMemorySettings.spillMem.getOrElse {
+        if (reserveSpillMemory) pinnedMem else 0L
+      }
       var finalExecutorMemOverhead = baselineMemorySettings.executorMemOverhead.getOrElse {
         if (isOffHeapLimitUserEnabled) {
           executorMemOverhead
@@ -912,11 +966,11 @@ abstract class AutoTuner(
         }
         // Else update pinned and spill memory to use default values
         pinnedMem = defaultPinnedMem
-        spillMem = defaultSpillMem
+        spillMem = if (reserveSpillMemory) defaultSpillMem else 0L
         finalExecutorMemOverhead = if (isOffHeapLimitUserEnabled) {
           executorMemOverhead
         } else {
-          executorMemOverhead + defaultPinnedMem + defaultSpillMem
+          executorMemOverhead + defaultPinnedMem + spillMem
         }
       }
       // Add recommendations for executor memory settings and a boolean for maxBytesInFlight
@@ -990,7 +1044,7 @@ abstract class AutoTuner(
         Math.max(80, numExecutorCores))
       if (setMaxBytesInFlight) {
         appendRecommendationForMemoryMB("spark.rapids.shuffle.multiThreaded.maxBytesInFlight",
-          recommendedMaxBytesInFlightMB.toString)
+          synthesizedMaxBytesInFlightMB.toString)
       }
       appendRecommendation("spark.rapids.sql.reader.multithreaded.combine.sizeBytes",
         configProvider.getEntry("READER_MULTITHREADED_COMBINE_THRESHOLD").getDefault)
@@ -1006,7 +1060,7 @@ abstract class AutoTuner(
       if (platform.isPlatformCSP) {
         if (setMaxBytesInFlight) {
           appendRecommendationForMemoryMB("spark.rapids.shuffle.multiThreaded.maxBytesInFlight",
-            recommendedMaxBytesInFlightMB.toString)
+            synthesizedMaxBytesInFlightMB.toString)
         }
         appendRecommendation("spark.rapids.sql.reader.multithreaded.combine.sizeBytes",
           configProvider.getEntry("READER_MULTITHREADED_COMBINE_THRESHOLD").getDefault)

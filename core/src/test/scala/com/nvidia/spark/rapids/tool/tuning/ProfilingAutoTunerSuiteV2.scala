@@ -2459,4 +2459,210 @@ class ProfilingAutoTunerSuiteV2 extends ProfilingAutoTunerSuiteBase {
     // scalastyle:on line.size.limit
     compareOutput(expectedResults, autoTunerOutput)
   }
+
+  // =========================================================================
+  // Memory policy controls: RESERVE_SPILL_MEMORY and RECOMMEND_MAX_BYTES_IN_FLIGHT
+  // =========================================================================
+
+  /**
+   * Build a Dataproc g2-standard-16 AutoTuner fixture with an optional tuning config override.
+   * NON_EXECUTOR_MEM_FRACTION=0.3 is applied so that execMemLeft stays below the 8 GiB
+   * pinned-memory cap under all four policy combinations, making each combination produce a
+   * distinct pinnedPool.size value.
+   *
+   * Arithmetic summary (both policies enabled, the legacy default):
+   *   totalMemMinusReserved = 65536 * 0.7 = 45875 MB
+   *   executorHeap = min(45875, 2048 * 16) = 32768 MB (32 g)
+   *   executorMemOverhead_base = floor(32768 * 0.1) = 3276 MB
+   *   execMemLeft = 45875 - 32768 = 13107 MB
+   *   maxBytesInFlight charge (4096 MB): overhead → 3276 + 4096 = 7372 MB
+   *   pinnedMem = min(8192, (13107 - 7372) / 2) = 2867 MB  →  "2867m"
+   *   finalOverhead = max(7372 + 2867 + 2867, 13107) = 13107 MB  →  "13107m"
+   */
+  private def buildMemoryPolicyAutoTuner(
+      extraTuningEntries: List[TuningConfigEntry]): AutoTuner = {
+    val instanceMapKey = NodeInstanceMapKey("g2-standard-16")
+    val gpuInstance = PlatformInstanceTypes.DATAPROC_BY_INSTANCE_NAME(instanceMapKey)
+    val logEventsProps: mutable.Map[String, String] = mutable.LinkedHashMap(
+      "spark.executor.cores" -> "8",
+      "spark.executor.instances" -> "2",
+      "spark.executor.resource.gpu.amount" -> "1",
+      "spark.rapids.sql.enabled" -> "true",
+      "spark.plugins" -> "com.nvidia.spark.SQLPlugin"
+    )
+    val sparkPropsWithMemory = logEventsProps +
+      ("spark.executor.memory" -> (gpuInstance.memoryMB.toString + "MiB"))
+    val infoProvider = getMockInfoProvider(0, Seq(0), Seq(0.0),
+      mutable.LinkedHashMap() ++ sparkPropsWithMemory, Some(testSparkVersion))
+    val platform = PlatformFactory.createInstance(PlatformNames.DATAPROC)
+    configureEventLogClusterInfoForTest(
+      platform,
+      numCores = gpuInstance.cores,
+      numWorkers = 4,
+      gpuCount = gpuInstance.numGpus,
+      sparkProperties = sparkPropsWithMemory.toMap
+    )
+    val tuningEntries = TuningConfigEntry(
+      name = "NON_EXECUTOR_MEM_FRACTION", default = "0.3") :: extraTuningEntries
+    val tuningConfigs = ToolTestUtils.buildTuningConfigs(default = tuningEntries)
+    buildAutoTunerForTests(infoProvider, platform,
+      userProvidedTuningConfigs = Some(tuningConfigs))
+  }
+
+  private def propValue(props: Seq[TuningEntryTrait], key: String): Option[String] =
+    props.find(_.name == key).map(_.getTuneValue())
+
+  // AE1: both policies true (default) — legacy behavior unchanged
+  test("Memory policy: both RESERVE_SPILL_MEMORY=true and RECOMMEND_MAX_BYTES_IN_FLIGHT=true " +
+    "preserve legacy pinned=2867m and maxBytesInFlight=4g") {
+    val autoTuner = buildMemoryPolicyAutoTuner(List.empty)
+    val (props, _) = autoTuner.getRecommendedProperties()
+    assert(propValue(props, "spark.rapids.memory.pinnedPool.size").contains("2867m"))
+    assert(propValue(props, "spark.executor.memoryOverhead").contains("13107m"))
+    assert(propValue(props, "spark.rapids.shuffle.multiThreaded.maxBytesInFlight").contains("4g"))
+  }
+
+  // AE2: RESERVE_SPILL_MEMORY=false only — full residual eligible for pinned; maxBytes unchanged
+  //   execMemLeft = 13107, overhead_after_maxBytes = 7372
+  //   pinnedMem = min(8192, 13107 - 7372 - 0) = 5735m
+  test("Memory policy: RESERVE_SPILL_MEMORY=false raises pinnedPool.size and keeps maxBytesInFlight") {
+    val autoTuner = buildMemoryPolicyAutoTuner(
+      List(TuningConfigEntry(name = "RESERVE_SPILL_MEMORY", default = "false")))
+    val (props, _) = autoTuner.getRecommendedProperties()
+    assert(propValue(props, "spark.rapids.memory.pinnedPool.size").contains("5735m"),
+      s"Expected 5735m but got ${propValue(props, "spark.rapids.memory.pinnedPool.size")}")
+    assert(propValue(props, "spark.executor.memoryOverhead").contains("13107m"))
+    assert(propValue(props, "spark.rapids.shuffle.multiThreaded.maxBytesInFlight").contains("4g"))
+  }
+
+  // AE3: RECOMMEND_MAX_BYTES_IN_FLIGHT=false only — no 4g charge, no synthesized output
+  //   execMemLeft = 13107, overhead_base = 3276 (no maxBytes charge)
+  //   pinnedMem = min(8192, (13107 - 3276) / 2) = 4915m
+  test("Memory policy: RECOMMEND_MAX_BYTES_IN_FLIGHT=false removes synthesis and raises pinned") {
+    val autoTuner = buildMemoryPolicyAutoTuner(
+      List(TuningConfigEntry(name = "RECOMMEND_MAX_BYTES_IN_FLIGHT", default = "false")))
+    val (props, comments) = autoTuner.getRecommendedProperties()
+    assert(propValue(props, "spark.rapids.memory.pinnedPool.size").contains("4915m"),
+      s"Expected 4915m but got ${propValue(props, "spark.rapids.memory.pinnedPool.size")}")
+    assert(propValue(props, "spark.executor.memoryOverhead").contains("13107m"))
+    assert(props.forall(_.name != "spark.rapids.shuffle.multiThreaded.maxBytesInFlight"),
+      "synthesized maxBytesInFlight should not appear in recommendations")
+    assert(!comments.exists(_.comment.contains(
+      "'spark.rapids.shuffle.multiThreaded.maxBytesInFlight' was not set.")),
+      "synthesized missing comment for maxBytesInFlight should be absent")
+  }
+
+  // AE4 (partial): both policies false — full residual, no spill, no maxBytes → pinned hits cap
+  //   execMemLeft = 13107, overhead_base = 3276
+  //   pinnedMem = min(8192, 13107 - 3276 - 0) = 8192m = 8g
+  //   finalOverhead = max(3276 + 8192, 13107) = 13107m (container budget unchanged)
+  test("Memory policy: both false → pinned=8g, no maxBytesInFlight, same container overhead") {
+    val autoTuner = buildMemoryPolicyAutoTuner(
+      List(
+        TuningConfigEntry(name = "RESERVE_SPILL_MEMORY", default = "false"),
+        TuningConfigEntry(name = "RECOMMEND_MAX_BYTES_IN_FLIGHT", default = "false")
+      ))
+    val (props, comments) = autoTuner.getRecommendedProperties()
+    assert(propValue(props, "spark.rapids.memory.pinnedPool.size").contains("8g"),
+      s"Expected 8g but got ${propValue(props, "spark.rapids.memory.pinnedPool.size")}")
+    assert(propValue(props, "spark.executor.memoryOverhead").contains("13107m"),
+      "Container overhead must be unchanged (R13)")
+    assert(props.forall(_.name != "spark.rapids.shuffle.multiThreaded.maxBytesInFlight"))
+    assert(!comments.exists(_.comment.contains(
+      "'spark.rapids.shuffle.multiThreaded.maxBytesInFlight' was not set.")))
+  }
+
+  // AE5: malformed policy values fall back to true (legacy behavior)
+  test("Memory policy: malformed RESERVE_SPILL_MEMORY and RECOMMEND_MAX_BYTES_IN_FLIGHT " +
+    "fall back to true (legacy behavior)") {
+    val autoTuner = buildMemoryPolicyAutoTuner(
+      List(
+        TuningConfigEntry(name = "RESERVE_SPILL_MEMORY", default = "yes"),
+        TuningConfigEntry(name = "RECOMMEND_MAX_BYTES_IN_FLIGHT", default = "1")
+      ))
+    val (props, _) = autoTuner.getRecommendedProperties()
+    // Invalid values → behave as true → same as both-true case
+    assert(propValue(props, "spark.rapids.memory.pinnedPool.size").contains("2867m"),
+      "Malformed policy should fall back to true (legacy 2867m)")
+    assert(propValue(props, "spark.rapids.shuffle.multiThreaded.maxBytesInFlight").contains("4g"))
+  }
+
+  // AE6 (partial): enforced spillPool.size is reserved when RESERVE_SPILL_MEMORY=false (R8)
+  //   enforced spill = 1g = 1024 MB (via target cluster enforced properties)
+  //   execMemLeft = 13107, overhead_after_maxBytes = 7372
+  //   explicitSpill = 1024 → pinnedMem = min(8192, max(0, 13107 - 7372 - 1024)) = 4711m
+  test("Memory policy: enforced spillPool.size is reserved even when RESERVE_SPILL_MEMORY=false") {
+    val instanceMapKey = NodeInstanceMapKey("g2-standard-16")
+    val gpuInstance = PlatformInstanceTypes.DATAPROC_BY_INSTANCE_NAME(instanceMapKey)
+    val logEventsProps: mutable.Map[String, String] = mutable.LinkedHashMap(
+      "spark.executor.cores" -> "8",
+      "spark.executor.instances" -> "2",
+      "spark.executor.resource.gpu.amount" -> "1",
+      "spark.rapids.sql.enabled" -> "true",
+      "spark.plugins" -> "com.nvidia.spark.SQLPlugin"
+    )
+    val sparkPropsWithMemory = logEventsProps +
+      ("spark.executor.memory" -> (gpuInstance.memoryMB.toString + "MiB"))
+    val infoProvider = getMockInfoProvider(0, Seq(0), Seq(0.0),
+      mutable.LinkedHashMap() ++ sparkPropsWithMemory, Some(testSparkVersion))
+    // Enforce a 1 GiB spill pool in the target cluster
+    val targetClusterInfo = ToolTestUtils.buildTargetClusterInfo(
+      enforcedSparkProperties = Map("spark.rapids.memory.spillPool.size" -> "1g")
+    )
+    val platform = PlatformFactory.createInstance(PlatformNames.DATAPROC, Some(targetClusterInfo))
+    configureEventLogClusterInfoForTest(
+      platform,
+      numCores = gpuInstance.cores,
+      numWorkers = 4,
+      gpuCount = gpuInstance.numGpus,
+      sparkProperties = sparkPropsWithMemory.toMap
+    )
+    val tuningConfigs = ToolTestUtils.buildTuningConfigs(
+      default = List(
+        TuningConfigEntry(name = "NON_EXECUTOR_MEM_FRACTION", default = "0.3"),
+        TuningConfigEntry(name = "RESERVE_SPILL_MEMORY", default = "false")
+      )
+    )
+    val autoTuner = buildAutoTunerForTests(infoProvider, platform,
+      userProvidedTuningConfigs = Some(tuningConfigs))
+    val (props, _) = autoTuner.getRecommendedProperties()
+    // Enforced spill=1g is reserved even with RESERVE_SPILL_MEMORY=false → pinned = 4711m
+    assert(propValue(props, "spark.rapids.memory.pinnedPool.size").contains("4711m"),
+      s"Expected 4711m (enforced spill=1g reserved) but got " +
+        s"${propValue(props, "spark.rapids.memory.pinnedPool.size")}")
+    // maxBytesInFlight still synthesized (flag enabled by default)
+    assert(propValue(props, "spark.rapids.shuffle.multiThreaded.maxBytesInFlight").contains("4g"))
+  }
+
+  // R14: on-prem host-off-heap-limit path is unaffected by RESERVE_SPILL_MEMORY
+  // (a quick smoke test: on-prem with RESERVE_SPILL_MEMORY=false should not crash and
+  //  the on-prem offHeapLimit formula does not call the CSP/spill-policy path)
+  test("Memory policy: RESERVE_SPILL_MEMORY=false does not affect on-prem off-heap-limit path") {
+    val logEventsProps: mutable.Map[String, String] = mutable.LinkedHashMap(
+      "spark.executor.cores" -> "16",
+      "spark.executor.instances" -> "2",
+      "spark.executor.memory" -> "30g",
+      "spark.executor.resource.gpu.amount" -> "1",
+      "spark.rapids.sql.enabled" -> "true",
+      "spark.plugins" -> "com.nvidia.spark.SQLPlugin",
+      "spark.rapids.memory.host.offHeapLimit.enabled" -> "true"
+    )
+    val tuningConfigs = ToolTestUtils.buildTuningConfigs(
+      default = List(TuningConfigEntry(name = "RESERVE_SPILL_MEMORY", default = "false"))
+    )
+    val infoProvider = getMockInfoProvider(0, Seq(0), Seq(0.0),
+      logEventsProps, Some(testSparkVersion))
+    val platform = PlatformFactory.createInstance(PlatformNames.ONPREM)
+    configureEventLogClusterInfoForTest(
+      platform,
+      numCores = 16,
+      numWorkers = 2,
+      gpuCount = 1,
+      sparkProperties = logEventsProps.toMap
+    )
+    val autoTuner = buildAutoTunerForTests(infoProvider, platform,
+      userProvidedTuningConfigs = Some(tuningConfigs))
+    // Should not throw; on-prem path uses the off-heap-limit formula independent of spill policy
+    val (_, _) = autoTuner.getRecommendedProperties()
+  }
 }
