@@ -25,6 +25,7 @@ import com.nvidia.spark.rapids.tool.{A100Gpu, AppSummaryInfoBaseProvider, GpuDev
 import com.nvidia.spark.rapids.tool.ToolTestUtils
 import com.nvidia.spark.rapids.tool.planparser.db.DBVersionExtractor
 import com.nvidia.spark.rapids.tool.profiling.{DriverLogUnsupportedOperators, ProfileArgs, ProfileMain, Profiler}
+import com.nvidia.spark.rapids.tool.tuning.config.{TuningConfigEntry, TuningConfiguration}
 import org.scalatest.prop.TableDrivenPropertyChecks._
 import org.scalatest.prop.TableFor4
 
@@ -1545,7 +1546,8 @@ class ProfilingAutoTunerSuite extends ProfilingAutoTunerSuiteBase {
   private def runConcurrentGpuTasksScenario(
       rapidsJars: Seq[String],
       enforcedProps: Map[String, String] = Map.empty,
-      preserveProps: List[String] = List.empty): String = {
+      preserveProps: List[String] = List.empty,
+      userProvidedTuningConfigs: Option[TuningConfiguration] = None): String = {
     val customProps = mutable.LinkedHashMap(
       "spark.executor.cores" -> "16",
       "spark.executor.memory" -> "122880MiB",
@@ -1578,7 +1580,8 @@ class ProfilingAutoTunerSuite extends ProfilingAutoTunerSuiteBase {
     val autoTuner =
       buildAutoTunerForTests(getGpuAppMockInfoProvider(
         propsFromLog = sparkProps,
-        rapidsJars = rapidsJars), platform)
+        rapidsJars = rapidsJars), platform,
+        userProvidedTuningConfigs = userProvidedTuningConfigs)
     val (properties, comments) = autoTuner.getRecommendedProperties()
     Profiler.getAutoTunerResultsAsString(properties, comments)
   }
@@ -1625,6 +1628,16 @@ class ProfilingAutoTunerSuite extends ProfilingAutoTunerSuiteBase {
     assert(output.contains(
       "spark.rapids.sql.format.parquet.multithreaded.combine.waitTime=1000"),
       s"Expected the multithreaded reader recommendation path to run, got:\n$output")
+  }
+
+  test("AutoTuner honours a named multithreaded combine size override") {
+    val tuningConfigs = ToolTestUtils.buildTuningConfigs(default = List(
+      TuningConfigEntry(name = "READER_MULTITHREADED_COMBINE_THRESHOLD", default = "32m")))
+    val output = runConcurrentGpuTasksScenario(
+      Seq.empty, userProvidedTuningConfigs = Some(tuningConfigs))
+    assert(output.contains(
+      "spark.rapids.sql.reader.multithreaded.combine.sizeBytes=32m"),
+      s"Expected the named combine size override to be recommended, got:\n$output")
   }
 
   // Note: This test verifies that the AutoTuner comments about enabling the file cache
