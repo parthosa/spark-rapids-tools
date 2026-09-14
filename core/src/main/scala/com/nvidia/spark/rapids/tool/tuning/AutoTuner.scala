@@ -1350,8 +1350,6 @@ abstract class AutoTuner(
     } else if (numExecutorCores >= 16 && numExecutorCores < 20 && platform.isPlatformCSP) {
       appendRecommendation("spark.rapids.sql.multiThreadedRead.numThreads",
         Math.max(80, numExecutorCores))
-      appendRecommendation("spark.rapids.sql.reader.multithreaded.combine.sizeBytes",
-        configProvider.getEntry("READER_MULTITHREADED_COMBINE_THRESHOLD").getDefault)
       appendRecommendation("spark.rapids.sql.format.parquet.multithreaded.combine.waitTime",
         configProvider.getEntry("READER_MULTITHREADED_COMBINE_WAIT_TIME").getDefault)
     } else {
@@ -1362,8 +1360,6 @@ abstract class AutoTuner(
       appendRecommendation("spark.rapids.sql.multiThreadedRead.numThreads",
         getBoundedNumThreads(coreMultiplier))
       if (platform.isPlatformCSP) {
-        appendRecommendation("spark.rapids.sql.reader.multithreaded.combine.sizeBytes",
-          configProvider.getEntry("READER_MULTITHREADED_COMBINE_THRESHOLD").getDefault)
         appendRecommendation("spark.rapids.sql.format.parquet.multithreaded.combine.waitTime",
           configProvider.getEntry("READER_MULTITHREADED_COMBINE_WAIT_TIME").getDefault)
       }
