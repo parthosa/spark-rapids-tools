@@ -16,8 +16,9 @@
 
 package com.nvidia.spark.rapids.tool.tuning
 
+import com.nvidia.spark.rapids.tool.ToolTestUtils
 import com.nvidia.spark.rapids.tool.tuning.config.{ConfTypeEnum, ProfTuningConfigProvider,
-  TuningConfigProvider, TuningEntryDefinition}
+  QualTuningConfigProvider, TuningConfigEntry, TuningConfigProvider, TuningEntryDefinition}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers._
 
@@ -72,5 +73,25 @@ class TuningEntrySuite extends AnyFunSuite {
 
   test("cache serializer definition lookup is safe when the entry is unavailable") {
     AutoTuner.getCacheSerializerDefinition(Map.empty) shouldBe None
+  }
+
+  test("profiling provider recognizes a named override from the profiling section") {
+    val config = ToolTestUtils.buildTuningConfigs(profiling = List(
+      TuningConfigEntry(name = "READER_MULTITHREADED_COMBINE_THRESHOLD", default = "32m")))
+    val provider = TuningConfigProvider.builder
+      .withUserProvidedConfig(Some(config))
+      .build[ProfTuningConfigProvider]
+
+    provider.isDefaultValueUserProvided("READER_MULTITHREADED_COMBINE_THRESHOLD") shouldBe true
+  }
+
+  test("qualification provider recognizes a named override from the qualification section") {
+    val config = ToolTestUtils.buildTuningConfigs(qualification = List(
+      TuningConfigEntry(name = "READER_MULTITHREADED_COMBINE_THRESHOLD", default = "32m")))
+    val provider = TuningConfigProvider.builder
+      .withUserProvidedConfig(Some(config))
+      .build[QualTuningConfigProvider]
+
+    provider.isDefaultValueUserProvided("READER_MULTITHREADED_COMBINE_THRESHOLD") shouldBe true
   }
 }
