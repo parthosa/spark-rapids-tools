@@ -765,20 +765,22 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
                 _recommendedWorkerNode.numGpus).toInt
             }
 
-            // Calculate cores per executor: use the user-specified value (enforced, or
-            // preserved from the source application) if valid, otherwise divide total
-            // cores in the instance by the number of GPUs.
+            val preserveSourceSizing =
+              recommendedClusterSizingStrategy == SourceCoresPreservingStrategy
+            // Use enforced/preserved cores, then source-preserving sizing when selected,
+            // validating against worker capacity before falling back to worker-derived cores.
             val defaultCoresPerExecutor = math.ceil(
               _recommendedWorkerNode.cores.toDouble / _recommendedWorkerNode.numGpus
             ).toInt
             val recommendedCoresPerExecutor =
               getEnforcedOrPreservedSparkProperty("spark.executor.cores", sourceSparkProperties.get)
               .flatMap(v => scala.util.Try(v.toInt).toOption)
+              .orElse(if (preserveSourceSizing) Some(clusterConfig.coresPerExec) else None)
               .filter { specifiedCores =>
                 val maxCores = _recommendedWorkerNode.cores
                 val isValid = specifiedCores > 0 && specifiedCores <= maxCores
                 if (!isValid) {
-                  logWarning(s"User-specified spark.executor.cores=$specifiedCores is invalid " +
+                  logWarning(s"Requested spark.executor.cores=$specifiedCores is invalid " +
                     s"(must be > 0 and <= $maxCores cores on instance " +
                     s"${_recommendedWorkerNode.name}). " +
                     s"Using default value: $defaultCoresPerExecutor")
@@ -787,11 +789,14 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
               }
               .getOrElse(defaultCoresPerExecutor)
 
-            // Calculate the recommended number of executors by dividing the total number of
-            // executors by the recommended cores per executor
-            val recommendedNumExecutors =
+            // Source-preserving sizing keeps the count used to calculate worker nodes above.
+            // Other strategies rescale total cores to the final cores per executor.
+            val recommendedNumExecutors = if (preserveSourceSizing) {
+              clusterConfig.numExecutors
+            } else {
               (clusterConfig.coresPerExec * clusterConfig.numExecutors) /
                 recommendedCoresPerExecutor
+            }
 
             val dynamicAllocSettings = Platform.getDynamicAllocationSettings(sourceSparkProperties)
             recommendedWorkerNode = Some(_recommendedWorkerNode)

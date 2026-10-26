@@ -255,14 +255,14 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
         s"- ${notEnoughMemCommentForKey("spark.executor.memory")}",
         s"- ${notEnoughMemCommentForKey("spark.executor.memoryOverhead")}",
         s"- ${notEnoughMemCommentForKey("spark.rapids.memory.pinnedPool.size")}",
-        s"- ${notEnoughMemComment(40140)}"
+        s"- ${notEnoughMemComment(22118)}"
       )),
     ("sufficient memory available for executors",
       "44g",
       Seq(
-        "--conf spark.executor.memory=32g",
-        "--conf spark.executor.memoryOverhead=14g",
-        "--conf spark.rapids.memory.pinnedPool.size=5530m"
+        "--conf spark.executor.memory=16g",
+        "--conf spark.executor.memoryOverhead=30g",
+        "--conf spark.rapids.memory.pinnedPool.size=8g"
       ))
   )
   // scalastyle:on line.size.limit
@@ -435,7 +435,7 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
   // are honored by the AutoTuner.
   // AutoTuner is expected to:
   // - Recommend `spark.executor.memory` to a value:
-  //     1.2g/core * 16cores = 19648m
+  //     1.2g/core * 8cores = 9824m
   // - Recommend `spark.rapids.sql.concurrentGpuTasks` to a value:
   //     max(CONC_GPU_TASKS (8), gpuMemory (24g) / GPU_MEM_PER_TASK (4g) = 6
   test("AutoTuner honours user provided tuning configurations specific to Qualification") {
@@ -488,20 +488,18 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
     val expectedResults =
       s"""|
           |Spark Properties:
-          |--conf spark.executor.cores=16
-          |--conf spark.executor.instances=2
-          |--conf spark.executor.memory=19648m
-          |--conf spark.executor.memoryOverhead=15168m
+          |--conf spark.executor.memory=9824m
+          |--conf spark.executor.memoryOverhead=24992m
           |--conf spark.executor.resource.gpu.amount=1
           |--conf spark.locality.wait=0
           |--conf spark.plugins=com.nvidia.spark.SQLPlugin
-          |--conf spark.rapids.memory.pinnedPool.size=6602m
-          |--conf spark.rapids.shuffle.multiThreaded.reader.threads=24
-          |--conf spark.rapids.shuffle.multiThreaded.writer.threads=24
+          |--conf spark.rapids.memory.pinnedPool.size=8g
+          |--conf spark.rapids.shuffle.multiThreaded.reader.threads=20
+          |--conf spark.rapids.shuffle.multiThreaded.writer.threads=20
           |--conf spark.rapids.sql.batchSizeBytes=1g
           |--conf spark.rapids.sql.concurrentGpuTasks=6
           |--conf spark.rapids.sql.enabled=true
-          |--conf spark.rapids.sql.multiThreadedRead.numThreads=32
+          |--conf spark.rapids.sql.multiThreadedRead.numThreads=20
           |--conf spark.sql.adaptive.advisoryPartitionSizeInBytes=128m
           |--conf spark.sql.adaptive.autoBroadcastJoinThreshold=[FILL_IN_VALUE]
           |--conf spark.sql.adaptive.coalescePartitions.initialPartitionNum=200
@@ -1827,19 +1825,17 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
     val expectedResults =
       s"""
         |Spark Properties:
-        |--conf spark.executor.cores=16
-        |--conf spark.executor.instances=2
         |--conf spark.executor.memory=[FILL_IN_VALUE]
         |--conf spark.executor.resource.gpu.amount=1
         |--conf spark.locality.wait=0
         |--conf spark.plugins=com.nvidia.spark.SQLPlugin
         |--conf spark.rapids.memory.pinnedPool.size=[FILL_IN_VALUE]
-        |--conf spark.rapids.shuffle.multiThreaded.reader.threads=24
-        |--conf spark.rapids.shuffle.multiThreaded.writer.threads=24
+        |--conf spark.rapids.shuffle.multiThreaded.reader.threads=20
+        |--conf spark.rapids.shuffle.multiThreaded.writer.threads=20
         |--conf spark.rapids.sql.batchSizeBytes=1g
         |--conf spark.rapids.sql.concurrentGpuTasks=3
         |--conf spark.rapids.sql.enabled=true
-        |--conf spark.rapids.sql.multiThreadedRead.numThreads=32
+        |--conf spark.rapids.sql.multiThreadedRead.numThreads=20
         |--conf spark.sql.adaptive.advisoryPartitionSizeInBytes=128m
         |--conf spark.sql.adaptive.autoBroadcastJoinThreshold=[FILL_IN_VALUE]
         |--conf spark.sql.adaptive.coalescePartitions.initialPartitionNum=200
@@ -1866,7 +1862,7 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
         |- ${notEnoughMemCommentForKey("spark.rapids.memory.pinnedPool.size")}
         |- ${classPathComments("rapids.jars.missing")}
         |- ${classPathComments("rapids.shuffle.jars")}
-        |- ${notEnoughMemComment(40140)}
+        |- ${notEnoughMemComment(22118)}
         |- $additionalSparkPluginsComment
         |""".stripMargin
     // scalastyle:on line.size.limit
@@ -2186,7 +2182,10 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
       systemProperties = Map.empty
     )
 
-    val autoTuner = buildAutoTunerForTests(infoProvider, platform)
+    val tuningConfigs = ToolTestUtils.buildTuningConfigs(qualification = List(
+      TuningConfigEntry(name = "CLUSTER_SIZING_STRATEGY", default = "ConstantTotalCoresStrategy")))
+    val autoTuner = buildAutoTunerForTests(infoProvider, platform,
+      userProvidedTuningConfigs = Some(tuningConfigs))
     val (properties, comments) = autoTuner.getRecommendedProperties()
     val autoTunerOutput = Profiler.getAutoTunerResultsAsString(properties, comments)
     // scalastyle:off line.size.limit
@@ -2276,7 +2275,10 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
       systemProperties = Map.empty
     )
 
-    val autoTuner = buildAutoTunerForTests(infoProvider, platform)
+    val tuningConfigs = ToolTestUtils.buildTuningConfigs(qualification = List(
+      TuningConfigEntry(name = "CLUSTER_SIZING_STRATEGY", default = "ConstantTotalCoresStrategy")))
+    val autoTuner = buildAutoTunerForTests(infoProvider, platform,
+      userProvidedTuningConfigs = Some(tuningConfigs))
     val (properties, comments) =
       autoTuner.getRecommendedProperties()
     // After enforcement: initial capped from 9 to 4,

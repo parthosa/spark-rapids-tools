@@ -105,6 +105,18 @@ trait ClusterSizingStrategy {
     getRecommendedNumGpus: => Int): RecommendedClusterConfig
 }
 
+object ClusterSizingStrategy {
+  def fromString(value: String): Option[ClusterSizingStrategy] = value match {
+    case "auto" => None
+    case "SourceCoresPreservingStrategy" => Some(SourceCoresPreservingStrategy)
+    case "ConstantTotalCoresStrategy" => Some(ConstantTotalCoresStrategy)
+    case "ConstantGpuCountStrategy" => Some(ConstantGpuCountStrategy)
+    case _ => throw new IllegalArgumentException(
+      s"Invalid CLUSTER_SIZING_STRATEGY '$value'. Expected auto, " +
+        "SourceCoresPreservingStrategy, ConstantTotalCoresStrategy, or ConstantGpuCountStrategy.")
+  }
+}
+
 /**
  * Strategy that keeps the total number of CPU cores between the source and
  * target clusters constant. It adjusts the number of executors (and hence GPUs)
@@ -154,7 +166,7 @@ object ConstantGpuCountStrategy extends ClusterSizingStrategy {
 
 /**
  * Strategy that preserves the source cluster's cores-per-executor and executor count.
- * Used in profiling mode on fixed (on-prem) hardware where node slicing is not
+ * Used on fixed (on-prem) hardware where node slicing is not
  * changeable. User-enforced overrides are still honored.
  */
 object SourceCoresPreservingStrategy extends ClusterSizingStrategy {

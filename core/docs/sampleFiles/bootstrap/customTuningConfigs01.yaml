@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.
+# Copyright (c) 2025-2026, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,3 +27,11 @@ default:
     max: 1
   - name: HEAP_PER_CORE
     default: 0.8g
+
+  # Automatic selection for both tools; qualification overrides it below.
+  - name: CLUSTER_SIZING_STRATEGY
+    default: auto
+
+qualification:
+  - name: CLUSTER_SIZING_STRATEGY
+    default: ConstantTotalCoresStrategy

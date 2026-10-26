@@ -80,11 +80,7 @@ class QualificationAutoTuner(
  * Provides configuration settings for the Qualification Tool's AutoTuner
  */
 object QualificationAutoTunerHelper extends AutoTunerHelper {
-  /**
-   * For the Qualification Tool's recommendation for cluster sizing, we want to keep
-   * the total number of CPU cores between the source and target clusters constant.
-   */
-  def recommendedClusterSizingStrategy(platform: Platform): ClusterSizingStrategy =
+  override protected def defaultClusterSizingStrategy: ClusterSizingStrategy =
     ConstantTotalCoresStrategy
 
   override def createAutoTunerInstance(

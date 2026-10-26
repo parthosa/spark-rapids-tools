@@ -726,7 +726,8 @@ abstract class AutoTuner(
    */
   private def configureGPURecommendedInstanceType(): Unit = {
     platform.createRecommendedGpuClusterInfo(recommendations, getAllSourceProperties,
-      autoTunerHelper.recommendedClusterSizingStrategy(platform))
+      autoTunerHelper.recommendedClusterSizingStrategy(
+        platform, configProvider.getEntry("CLUSTER_SIZING_STRATEGY").getDefault))
     platform.recommendedClusterInfo.foreach { gpuClusterRec =>
       // TODO: Should we skip recommendation if cores per executor is lower than a min value?
       appendRecommendation(
@@ -3334,11 +3335,24 @@ class ProfilingAutoTuner(
 trait AutoTunerHelper extends Logging {
   private val pluginReleaseIntervalMonths = 2L
 
+  protected def defaultClusterSizingStrategy: ClusterSizingStrategy
+
   /**
    * Strategy for cluster shape recommendation.
    * See [[com.nvidia.spark.rapids.tool.ClusterSizingStrategy]] for different strategies.
    */
-  def recommendedClusterSizingStrategy(platform: Platform): ClusterSizingStrategy
+  final def recommendedClusterSizingStrategy(
+      platform: Platform,
+      strategy: String = "auto"): ClusterSizingStrategy = {
+    ClusterSizingStrategy.fromString(strategy).getOrElse {
+      val hasTargetWorkerInfo = platform.targetCluster.exists(!_.getWorkerInfo.isEmpty)
+      if (!platform.isPlatformCSP && !hasTargetWorkerInfo) {
+        SourceCoresPreservingStrategy
+      } else {
+        defaultClusterSizingStrategy
+      }
+    }
+  }
   // the plugin jar is in the form of rapids-4-spark_scala_binary-(version)-*.jar
   lazy val pluginJarRegEx: Regex = "rapids-4-spark_\\d\\.\\d+-(\\d{2}\\.\\d{2}\\.\\d+).*\\.jar".r
 
@@ -3456,20 +3470,8 @@ trait AutoTunerHelper extends Logging {
  * implementation of the `AutoTunerHelper` interface.
  */
 object ProfilingAutoTunerHelper extends AutoTunerHelper {
-  /**
-   * On-prem profiling without a target cluster: use SourceCoresPreservingStrategy
-   * to preserve the source cluster's cores and executor count (the hardware is fixed).
-   * For CSP platforms or when a target cluster is provided, use ConstantGpuCountStrategy.
-   */
-  def recommendedClusterSizingStrategy(platform: Platform): ClusterSizingStrategy = {
-    // true when user provided target hardware (workerInfo with cores/memory/GPU)
-    val hasTargetWorkerInfo = platform.targetCluster.exists(!_.getWorkerInfo.isEmpty)
-    if (!platform.isPlatformCSP && !hasTargetWorkerInfo) {
-      SourceCoresPreservingStrategy
-    } else {
-      ConstantGpuCountStrategy
-    }
-  }
+  override protected def defaultClusterSizingStrategy: ClusterSizingStrategy =
+    ConstantGpuCountStrategy
 
   def createAutoTunerInstance(
       appInfoProvider: AppSummaryInfoBaseProvider,
