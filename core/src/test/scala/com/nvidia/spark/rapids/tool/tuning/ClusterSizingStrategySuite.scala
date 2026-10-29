@@ -166,7 +166,8 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
           sourceExecutors: Int = 2,
           sourceCores: Int = 2,
           enforced: Map[String, String] = Map.empty,
-          preserved: List[String] = List.empty): (RecommendedClusterInfo, Map[String, String]) = {
+          preserved: List[String] = List.empty):
+          (RecommendedClusterInfo, Map[String, String], Seq[String]) = {
         val config = PropertiesLoader[TuningConfiguration].loadFromContent(
           s"""default:
              |  - name: CLUSTER_SIZING_STRATEGY
@@ -193,16 +194,17 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
           numWorkers = sourceExecutors, sparkProperties = props.toMap)
         val tuner = tunerHelper.createAutoTunerInstance(info, platform,
           BaseDriverLogInfoProvider.noneDriverLog, config)
-        val properties = tuner.getRecommendedProperties(showOnlyUpdatedProps = false)._1
-          .map(p => p.name -> p.getTuneValue()).toMap
-        (platform.recommendedClusterInfo.get, properties)
+        val (recommendations, comments) =
+          tuner.getRecommendedProperties(showOnlyUpdatedProps = false)
+        val properties = recommendations.map(p => p.name -> p.getTuneValue()).toMap
+        (platform.recommendedClusterInfo.get, properties, comments.map(_.comment))
       }
 
       Seq(2, 18).foreach { sourceExecutors =>
         // A larger target worker should not change the original 2 cores per executor.
         // Keep all original executors, with matching worker counts and output Spark settings.
         test(s"$toolName keeps $sourceExecutors executors with 2 cores on $platformName") {
-          val (cluster, properties) = recommendSourceSizing(sourceExecutors = sourceExecutors)
+          val (cluster, properties, _) = recommendSourceSizing(sourceExecutors = sourceExecutors)
           cluster.coresPerExecutor shouldBe 2
           cluster.numExecutors shouldBe sourceExecutors
           cluster.numWorkerNodes shouldBe (if (platformName == PlatformNames.ONPREM) {
@@ -218,7 +220,7 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
       // Values the user requires should win over keeping the original setup.
       // Expect 5 executors with 3 cores each in both the results and output Spark settings.
       test(s"$toolName uses required cores and executor count on $platformName") {
-        val (cluster, properties) = recommendSourceSizing(enforced = Map(
+        val (cluster, properties, _) = recommendSourceSizing(enforced = Map(
           "spark.executor.cores" -> "3", "spark.executor.instances" -> "5"))
         cluster.coresPerExecutor shouldBe 3
         cluster.numExecutors shouldBe 5
@@ -230,7 +232,7 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
       // Asking to keep the original Spark values should leave 2 executors with 2 cores each.
       // The output Spark settings should keep these values too.
       test(s"$toolName keeps selected Spark values on $platformName") {
-        val (cluster, properties) = recommendSourceSizing(preserved =
+        val (cluster, properties, _) = recommendSourceSizing(preserved =
           List("spark.executor.cores", "spark.executor.instances"))
         cluster.coresPerExecutor shouldBe 2
         cluster.numExecutors shouldBe 2
@@ -242,7 +244,7 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
       // The original 32 cores per executor will not fit on the target worker.
       // Use 16 cores on EMR or 8 on onprem. Keep 2 executors and the same values in output.
       test(s"$toolName limits source cores to what fits on $platformName") {
-        val (cluster, properties) = recommendSourceSizing(sourceCores = 32)
+        val (cluster, properties, _) = recommendSourceSizing(sourceCores = 32)
         val expectedCores = if (platformName == PlatformNames.ONPREM) 8 else 16
         cluster.coresPerExecutor shouldBe expectedCores
         cluster.numExecutors shouldBe 2
@@ -253,14 +255,53 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
 
       if (platformName == PlatformNames.ONPREM) {
         test(s"$toolName fits both source executors on a 16-core, 2-GPU worker") {
-          val (cluster, properties) = recommendSourceSizing(sourceCores = 12)
+          val (cluster, properties, _) = recommendSourceSizing(sourceCores = 12)
           cluster.coresPerExecutor shouldBe 8
           cluster.numExecutors shouldBe 2
           properties("spark.executor.cores") shouldBe "8"
           properties("spark.executor.instances") shouldBe "2"
         }
+
+        test(s"$toolName reports user-overridden cores even above per-GPU capacity") {
+          val (enforcedCluster, enforcedProps, enforcedComments) = recommendSourceSizing(enforced =
+            Map("spark.executor.cores" -> "12"))
+          enforcedCluster.coresPerExecutor shouldBe 12
+          enforcedProps("spark.executor.cores") shouldBe "12"
+          enforcedComments.exists(_.contains("only 8 CPU core(s) per GPU")) shouldBe true
+
+          val (preservedCluster, preservedProps, preservedComments) = recommendSourceSizing(
+            sourceCores = 12, preserved = List("spark.executor.cores"))
+          preservedCluster.coresPerExecutor shouldBe 12
+          preservedProps("spark.executor.cores") shouldBe "12"
+          preservedComments.exists(_.contains("only 8 CPU core(s) per GPU")) shouldBe true
+        }
       }
     }
+  }
+
+  test("reject target workers with more GPUs than CPU cores") {
+    val error = intercept[IllegalArgumentException] {
+      ToolTestUtils.buildTargetClusterInfo(
+        cpuCores = Some(2), memoryGB = Some(64L),
+        gpuCount = Some(4), gpuDevice = Some(GpuTypes.L4))
+    }
+    error.getMessage should include ("2 CPU core(s) for 4 GPU(s)")
+  }
+
+  test("reject catalog workers that cannot run one executor per GPU") {
+    val target = ToolTestUtils.buildTargetClusterInfo(
+      workerNodeInstanceType = Some("n1-standard-1"), gpuCount = Some(4))
+    val error = intercept[IllegalArgumentException] {
+      PlatformFactory.createInstance(PlatformNames.DATAPROC, Some(target))
+    }
+    error.getMessage should include ("1 CPU core(s) for 4 GPU(s)")
+  }
+
+  test("the strategy core fallback stays positive for an unresolved worker shape") {
+    val platform = PlatformFactory.createInstance(PlatformNames.ONPREM)
+    platform.recommendedWorkerNode = Some(InstanceInfo(
+      cores = 1, memoryMB = 1024L, name = "unresolved", numGpus = 4, gpuDevice = L4Gpu))
+    platform.recommendedCoresPerExec shouldBe 1
   }
 
   private def sizingComments(

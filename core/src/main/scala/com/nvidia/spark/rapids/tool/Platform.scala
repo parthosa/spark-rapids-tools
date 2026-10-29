@@ -318,9 +318,19 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
   */
   protected def getRecommendedInstanceInfoFromTargetWorker(
       workerInfoOpt: Option[WorkerInfo]): Option[InstanceInfo] = {
+    def checkWorkerCapacity(instance: InstanceInfo): InstanceInfo = {
+      if (instance.cores < instance.numGpus) {
+        throw new IllegalArgumentException(
+          s"Instance ${instance.name} has ${instance.cores} CPU core(s) for " +
+            s"${instance.numGpus} GPU(s); at least one CPU core per GPU is required.")
+      }
+      instance
+    }
+
     // Helper function to get default instance info
     def getDefaultInstance: Option[InstanceInfo] = {
-      val defaultInstanceInfo = defaultRecommendedWorkerNode.flatMap(getInstanceMapByName.get)
+      val defaultInstanceInfo = defaultRecommendedWorkerNode
+        .flatMap(getInstanceMapByName.get).map(checkWorkerCapacity)
       logInfo("Worker info is not provided in the target cluster. " +
         s"Using default instance type: $defaultInstanceInfo")
       defaultInstanceInfo
@@ -331,7 +341,7 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
         // Try CSP-style first (instanceType)
         workerInfo.getNodeInstanceMapKey match {
           case Some(nodeInstanceMapKey) =>
-            getInstanceMapByName.get(nodeInstanceMapKey).orElse {
+            getInstanceMapByName.get(nodeInstanceMapKey).map(checkWorkerCapacity).orElse {
               val errorMsg =
                 s"""
                    |Could not find matching instance type in resources map.
@@ -379,7 +389,7 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
 
   // Default recommendation based on NDS benchmarks (note: this could be platform specific)
   final def recommendedCoresPerExec: Int = {
-    recommendedWorkerNode.map(instInfo => instInfo.cores / instInfo.numGpus)
+    recommendedWorkerNode.map(instInfo => math.max(1, instInfo.cores / instInfo.numGpus))
       .getOrElse(defaultRecommendedCoresPerExec)
   }
 
@@ -773,17 +783,24 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
 
             val preserveSourceSizing =
               recommendedClusterSizingStrategy == SourceCoresPreservingStrategy
-            // Use enforced/preserved cores, then source-preserving sizing when selected,
-            // validating against worker capacity before falling back to worker-derived cores.
+            // One executor is placed on each GPU. Use the worker's per-GPU capacity
+            // when source cores do not fit, but keep explicit user overrides.
             val defaultCoresPerExecutor =
-              _recommendedWorkerNode.cores / _recommendedWorkerNode.numGpus
+              math.max(1, _recommendedWorkerNode.cores / _recommendedWorkerNode.numGpus)
             val recommendedCoresPerExecutor =
               getEnforcedOrPreservedSparkProperty("spark.executor.cores", sourceSparkProperties.get)
               .flatMap(v => scala.util.Try(v.toInt).toOption)
               .orElse(if (preserveSourceSizing) Some(clusterConfig.coresPerExec) else None)
               .filter { specifiedCores =>
                 val maxCores = defaultCoresPerExecutor
-                val isValid = specifiedCores > 0 && specifiedCores <= maxCores
+                val isUserOverridden = isPropertyUserOverridden("spark.executor.cores")
+                val isValid = specifiedCores > 0 &&
+                  (specifiedCores <= maxCores || isUserOverridden)
+                if (specifiedCores > maxCores && isUserOverridden) {
+                  logWarning(s"User-overridden spark.executor.cores=$specifiedCores exceeds " +
+                    s"the $maxCores cores available per GPU on instance " +
+                    s"${_recommendedWorkerNode.name}. Keeping the requested value.")
+                }
                 if (!isValid) {
                   logWarning(s"Requested spark.executor.cores=$specifiedCores is invalid " +
                     s"(must be > 0 and <= $maxCores cores per executor for " +
@@ -795,9 +812,9 @@ abstract class Platform(var gpuDevice: Option[GpuDevice],
               }
               .getOrElse(defaultCoresPerExecutor)
 
-            // Source-preserving sizing keeps the count used to calculate worker nodes above.
-            // Other strategies rescale total cores to the final cores per executor.
-            val recommendedNumExecutors = if (preserveSourceSizing) {
+            // Strategies that keep the GPU count also keep the executor count.
+            val recommendedNumExecutors = if (preserveSourceSizing ||
+                recommendedClusterSizingStrategy == ConstantGpuCountStrategy) {
               clusterConfig.numExecutors
             } else {
               (clusterConfig.coresPerExec * clusterConfig.numExecutors) /

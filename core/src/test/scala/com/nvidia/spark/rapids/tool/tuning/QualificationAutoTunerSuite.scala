@@ -20,7 +20,7 @@ import java.nio.file.Paths
 
 import scala.collection.mutable
 
-import com.nvidia.spark.rapids.tool.{ConstantTotalCoresStrategy, DynamicAllocationInfo, EventLogPathProcessor, GpuTypes, PlatformFactory, PlatformNames, SourceCoresPreservingStrategy, ToolTestUtils}
+import com.nvidia.spark.rapids.tool.{ConstantGpuCountStrategy, ConstantTotalCoresStrategy, DynamicAllocationInfo, EventLogPathProcessor, GpuTypes, PlatformFactory, PlatformNames, SourceCoresPreservingStrategy, ToolTestUtils}
 import com.nvidia.spark.rapids.tool.analysis.{AppSQLPlanAnalyzer, QualSparkMetricsAggregator}
 import com.nvidia.spark.rapids.tool.profiling.{Profiler, PySparkMemoryEvidence, ShuffleInputProvenance, ShuffleStageInputAnalysis}
 import com.nvidia.spark.rapids.tool.qualification.{PluginTypeChecker, QualificationArgs, QualificationMain}
@@ -2189,6 +2189,72 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
     assert(values("spark.dynamicAllocation.minExecutors") == "1")
     assert(values("spark.dynamicAllocation.maxExecutors") == "4")
     assert(!comments.exists(_.comment.contains("Tuned dynamic allocation properties")))
+  }
+
+  test("constant GPU count strategy keeps dynamic allocation executor counts") {
+    val sourceProps = mutable.LinkedHashMap[String, String](
+      "spark.executor.cores" -> "2",
+      "spark.executor.instances" -> "2",
+      "spark.executor.memory" -> "8g",
+      "spark.dynamicAllocation.enabled" -> "true",
+      "spark.dynamicAllocation.initialExecutors" -> "2",
+      "spark.dynamicAllocation.minExecutors" -> "1",
+      "spark.dynamicAllocation.maxExecutors" -> "2")
+    val infoProvider = getMockInfoProvider(0, Seq(0), Seq(0.0), sourceProps,
+      Some(testSparkVersion))
+    val target = ToolTestUtils.buildTargetClusterInfo(
+      cpuCores = Some(4), memoryGB = Some(64L), gpuCount = Some(1),
+      gpuDevice = Some(GpuTypes.L4))
+    val platform = PlatformFactory.createInstance(PlatformNames.ONPREM, Some(target))
+    platform.configureClusterInfoFromEventLog(
+      coresPerExecutor = 2, execsPerNode = 1, numExecs = 2, numExecutorNodes = 2,
+      sparkProperties = sourceProps.toMap, systemProperties = Map.empty)
+    val config = ToolTestUtils.buildTuningConfigs(qualification = List(
+      TuningConfigEntry(name = "CLUSTER_SIZING_STRATEGY",
+        default = ConstantGpuCountStrategy.getNameAsString)))
+    val tuner = buildAutoTunerForTests(infoProvider, platform,
+      userProvidedTuningConfigs = Some(config))
+    val (properties, _) = tuner.getRecommendedProperties(showOnlyUpdatedProps = false)
+    val values = properties.map(p => p.name -> p.getTuneValue()).toMap
+
+    platform.recommendedClusterInfo.get.numExecutors shouldBe 2
+    values("spark.executor.instances") shouldBe "2"
+    values("spark.dynamicAllocation.initialExecutors") shouldBe "2"
+    values("spark.dynamicAllocation.minExecutors") shouldBe "1"
+    values("spark.dynamicAllocation.maxExecutors") shouldBe "2"
+  }
+
+  test("constant GPU count keeps an enforced executor count above the source allocation max") {
+    val sourceProps = mutable.LinkedHashMap[String, String](
+      "spark.executor.cores" -> "2",
+      "spark.executor.instances" -> "2",
+      "spark.executor.memory" -> "8g",
+      "spark.dynamicAllocation.enabled" -> "true",
+      "spark.dynamicAllocation.initialExecutors" -> "2",
+      "spark.dynamicAllocation.minExecutors" -> "1",
+      "spark.dynamicAllocation.maxExecutors" -> "2")
+    val infoProvider = getMockInfoProvider(0, Seq(0), Seq(0.0), sourceProps,
+      Some(testSparkVersion))
+    val target = ToolTestUtils.buildTargetClusterInfo(
+      cpuCores = Some(4), memoryGB = Some(64L), gpuCount = Some(1),
+      gpuDevice = Some(GpuTypes.L4),
+      enforcedSparkProperties = Map("spark.executor.instances" -> "5"))
+    val platform = PlatformFactory.createInstance(PlatformNames.ONPREM, Some(target))
+    platform.configureClusterInfoFromEventLog(
+      coresPerExecutor = 2, execsPerNode = 1, numExecs = 2, numExecutorNodes = 2,
+      sparkProperties = sourceProps.toMap, systemProperties = Map.empty)
+    val config = ToolTestUtils.buildTuningConfigs(qualification = List(
+      TuningConfigEntry(name = "CLUSTER_SIZING_STRATEGY",
+        default = ConstantGpuCountStrategy.getNameAsString)))
+    val tuner = buildAutoTunerForTests(infoProvider, platform,
+      userProvidedTuningConfigs = Some(config))
+    val (properties, _) = tuner.getRecommendedProperties(showOnlyUpdatedProps = false)
+    val values = properties.map(p => p.name -> p.getTuneValue()).toMap
+
+    platform.recommendedClusterInfo.get.numExecutors shouldBe 5
+    values("spark.executor.instances") shouldBe "5"
+    values("spark.dynamicAllocation.initialExecutors") shouldBe "5"
+    values("spark.dynamicAllocation.maxExecutors") shouldBe "5"
   }
 
   test("test dynamic allocation recommendations handle zero and negative values") {

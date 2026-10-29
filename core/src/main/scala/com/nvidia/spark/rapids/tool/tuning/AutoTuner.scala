@@ -740,6 +740,16 @@ abstract class AutoTuner(
     platform.createRecommendedGpuClusterInfo(recommendations, getAllSourceProperties,
       selectedClusterSizingStrategy)
     platform.recommendedClusterInfo.foreach { gpuClusterRec =>
+      val coreKey = SparkTaskSlotModel.Properties.ExecutorCores
+      platform.recommendedWorkerNode.foreach { worker =>
+        val coresPerGpu = worker.cores / worker.numGpus
+        if (platform.isPropertyUserOverridden(coreKey) &&
+            gpuClusterRec.coresPerExecutor > coresPerGpu) {
+          appendComment(s"'$coreKey' is ${gpuClusterRec.coresPerExecutor}, but target worker " +
+            s"${worker.name} has only $coresPerGpu CPU core(s) per GPU. " +
+            "The requested executor may not fit; reduce the core setting or use a larger worker.")
+        }
+      }
       // TODO: Should we skip recommendation if cores per executor is lower than a min value?
       appendRecommendation(
         SparkTaskSlotModel.Properties.ExecutorCores, gpuClusterRec.coresPerExecutor)
@@ -1848,7 +1858,8 @@ abstract class AutoTuner(
     // Scale factor to adjust executor counts based on core ratio.
     // Example: source=8 cores, target=16 cores → ratio=0.5 → need fewer executors
     // Example: source=16 cores, target=8 cores → ratio=2.0 → need more executors
-    val adjustRatio = if (selectedClusterSizingStrategy == SourceCoresPreservingStrategy) {
+    val adjustRatio = if (selectedClusterSizingStrategy == SourceCoresPreservingStrategy ||
+        selectedClusterSizingStrategy == ConstantGpuCountStrategy) {
       1.0
     } else {
       sourceExecCores.toDouble / gpuExecCores
@@ -1956,8 +1967,16 @@ abstract class AutoTuner(
     val maxOpt = getRecValue(
       "spark.dynamicAllocation.maxExecutors")
 
-    // Cap initialExecutors and executor.instances to maxExecutors
+    // Keep an explicitly requested executor count for strategies that preserve GPU count.
+    // A source max below that count must grow with it to keep the settings consistent.
     (initialOpt, maxOpt) match {
+      case (Some(initial), Some(max)) if initial > max &&
+          (selectedClusterSizingStrategy == SourceCoresPreservingStrategy ||
+            selectedClusterSizingStrategy == ConstantGpuCountStrategy) &&
+          !platform.isPropertyUserOverridden("spark.dynamicAllocation.maxExecutors") &&
+          !ignoreRecommendation("spark.dynamicAllocation.maxExecutors") =>
+        appendRecommendation("spark.dynamicAllocation.maxExecutors", initial.toLong)
+        trackAdjustment("spark.dynamicAllocation.maxExecutors", max, initial)
       case (Some(initial), Some(max)) if initial > max =>
         appendRecommendation(
           "spark.dynamicAllocation.initialExecutors", max.toLong)
@@ -1972,7 +1991,7 @@ abstract class AutoTuner(
     }
 
     // Cap minExecutors to maxExecutors
-    (minOpt, maxOpt) match {
+    (minOpt, getRecValue("spark.dynamicAllocation.maxExecutors")) match {
       case (Some(min), Some(max)) if min > max =>
         appendRecommendation(
           "spark.dynamicAllocation.minExecutors", max.toLong)

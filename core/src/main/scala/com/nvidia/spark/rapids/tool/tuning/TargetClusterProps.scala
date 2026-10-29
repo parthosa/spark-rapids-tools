@@ -69,6 +69,11 @@ class WorkerInfo (
         "target cluster configuration.")
     }
     gpu.validate()
+    if (cpuCores > 0 && gpu.count > cpuCores) {
+      throw new IllegalArgumentException(
+        s"Target worker has $cpuCores CPU core(s) for ${gpu.count} GPU(s); " +
+          "at least one CPU core per GPU is required.")
+    }
   }
 
   /**
