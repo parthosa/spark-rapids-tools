@@ -2218,6 +2218,7 @@ class QualificationAutoTunerSuite extends BaseAutoTunerSuite {
     val values = properties.map(p => p.name -> p.getTuneValue()).toMap
 
     platform.recommendedClusterInfo.get.numExecutors shouldBe 2
+    values("spark.executor.cores") shouldBe "4"
     values("spark.executor.instances") shouldBe "2"
     values("spark.dynamicAllocation.initialExecutors") shouldBe "2"
     values("spark.dynamicAllocation.minExecutors") shouldBe "1"
