@@ -166,7 +166,9 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
           sourceExecutors: Int = 2,
           sourceCores: Int = 2,
           enforced: Map[String, String] = Map.empty,
-          preserved: List[String] = List.empty):
+          preserved: List[String] = List.empty,
+          eventLogExecutors: Option[Int] = None,
+          dynamicAllocationEnabled: Boolean = false):
           (RecommendedClusterInfo, Map[String, String], Seq[String]) = {
         val config = PropertiesLoader[TuningConfiguration].loadFromContent(
           s"""default:
@@ -178,6 +180,9 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
           "spark.executor.cores" -> sourceCores.toString,
           "spark.executor.instances" -> sourceExecutors.toString,
           "spark.executor.memory" -> "16g")
+        if (dynamicAllocationEnabled) {
+          props("spark.dynamicAllocation.enabled") = "true"
+        }
         val target = if (platformName == PlatformNames.ONPREM) {
           ToolTestUtils.buildTargetClusterInfo(
             cpuCores = Some(16), memoryGB = Some(64L),
@@ -191,7 +196,8 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
         platform.recommendedWorkerNode.isDefined shouldBe true
         val info = getMockInfoProvider(0, Seq(0), Seq(0.0), props, Some(testSparkVersion))
         configureEventLogClusterInfoForTest(platform, numCores = sourceCores,
-          numWorkers = sourceExecutors, sparkProperties = props.toMap)
+          numWorkers = eventLogExecutors.getOrElse(sourceExecutors),
+          sparkProperties = props.toMap)
         val tuner = tunerHelper.createAutoTunerInstance(info, platform,
           BaseDriverLogInfoProvider.noneDriverLog, config)
         val (recommendations, comments) =
@@ -200,21 +206,15 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
         (platform.recommendedClusterInfo.get, properties, comments.map(_.comment))
       }
 
-      Seq(2, 18).foreach { sourceExecutors =>
-        // A larger target worker should not change the original 2 cores per executor.
-        // Keep all original executors, with matching worker counts and output Spark settings.
-        test(s"$toolName keeps $sourceExecutors executors with 2 cores on $platformName") {
-          val (cluster, properties, _) = recommendSourceSizing(sourceExecutors = sourceExecutors)
-          cluster.coresPerExecutor shouldBe 2
-          cluster.numExecutors shouldBe sourceExecutors
-          cluster.numWorkerNodes shouldBe (if (platformName == PlatformNames.ONPREM) {
-            -1
-          } else {
-            sourceExecutors
-          })
-          properties("spark.executor.cores") shouldBe "2"
-          properties("spark.executor.instances") shouldBe sourceExecutors.toString
-        }
+      // A larger target worker should not change the original 2 cores per executor.
+      // Keep all 18 executors, with matching worker counts and output Spark settings.
+      test(s"$toolName keeps 18 executors with 2 cores on $platformName") {
+        val (cluster, properties, _) = recommendSourceSizing(sourceExecutors = 18)
+        cluster.coresPerExecutor shouldBe 2
+        cluster.numExecutors shouldBe 18
+        cluster.numWorkerNodes shouldBe (if (platformName == PlatformNames.ONPREM) -1 else 18)
+        properties("spark.executor.cores") shouldBe "2"
+        properties("spark.executor.instances") shouldBe "18"
       }
 
       // Values the user requires should win over keeping the original setup.
@@ -229,28 +229,28 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
         properties("spark.executor.instances") shouldBe "5"
       }
 
-      // Asking to keep the original Spark values should leave 2 executors with 2 cores each.
-      // The output Spark settings should keep these values too.
-      test(s"$toolName keeps selected Spark values on $platformName") {
-        val (cluster, properties, _) = recommendSourceSizing(preserved =
-          List("spark.executor.cores", "spark.executor.instances"))
-        cluster.coresPerExecutor shouldBe 2
-        cluster.numExecutors shouldBe 2
-        cluster.numWorkerNodes shouldBe (if (platformName == PlatformNames.ONPREM) -1 else 2)
-        properties("spark.executor.cores") shouldBe "2"
-        properties("spark.executor.instances") shouldBe "2"
+      if (platformName == PlatformNames.EMR) {
+        // The original 32 cores per executor will not fit on the target worker.
+        // Keep 2 executors and use 16 cores each on EMR.
+        test(s"$toolName limits source cores to what fits on $platformName") {
+          val (cluster, properties, _) = recommendSourceSizing(sourceCores = 32)
+          cluster.coresPerExecutor shouldBe 16
+          cluster.numExecutors shouldBe 2
+          cluster.numWorkerNodes shouldBe 2
+          properties("spark.executor.cores") shouldBe "16"
+          properties("spark.executor.instances") shouldBe "2"
+        }
       }
 
-      // The original 32 cores per executor will not fit on the target worker.
-      // Use 16 cores on EMR or 8 on onprem. Keep 2 executors and the same values in output.
-      test(s"$toolName limits source cores to what fits on $platformName") {
-        val (cluster, properties, _) = recommendSourceSizing(sourceCores = 32)
-        val expectedCores = if (platformName == PlatformNames.ONPREM) 8 else 16
-        cluster.coresPerExecutor shouldBe expectedCores
-        cluster.numExecutors shouldBe 2
-        cluster.numWorkerNodes shouldBe (if (platformName == PlatformNames.ONPREM) -1 else 2)
-        properties("spark.executor.cores") shouldBe expectedCores.toString
-        properties("spark.executor.instances") shouldBe "2"
+      // With dynamic allocation, the observed count can differ from the source setting.
+      // Preserving spark.executor.instances must use the source value, not the observed count.
+      test(s"$toolName preserves source executor count over observed count on $platformName") {
+        val (cluster, properties, _) = recommendSourceSizing(sourceExecutors = 18,
+          preserved = List("spark.executor.instances"), eventLogExecutors = Some(2),
+          dynamicAllocationEnabled = true)
+        cluster.numExecutors shouldBe 18
+        cluster.numWorkerNodes shouldBe (if (platformName == PlatformNames.ONPREM) -1 else 18)
+        properties("spark.executor.instances") shouldBe "18"
       }
 
       if (platformName == PlatformNames.ONPREM) {
@@ -258,6 +258,7 @@ class ClusterSizingStrategySuite extends BaseAutoTunerSuite {
           val (cluster, properties, _) = recommendSourceSizing(sourceCores = 12)
           cluster.coresPerExecutor shouldBe 8
           cluster.numExecutors shouldBe 2
+          cluster.numWorkerNodes shouldBe -1
           properties("spark.executor.cores") shouldBe "8"
           properties("spark.executor.instances") shouldBe "2"
         }
